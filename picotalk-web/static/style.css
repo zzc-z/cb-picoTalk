@@ -1,0 +1,118 @@
+
+/* Define colors */
+:root {
+    --col-main1: #2cb5e8;
+    --col-main2: #ffffff;
+    --col-link: #0080ff;
+    --col-link-hover: #80f0ff;
+}
+
+body {
+    background-image: linear-gradient(0deg, var(--col-main2) 0%, var(--col-main1) 75%);
+    background-attachment: fixed;
+    min-height: 100%;
+}
+
+a {
+    text-decoration: none;
+    color: var(--col-link);
+}
+
+a:hover {
+    text-decoration: none;
+    color: var(--col-link-hover);
+}
+
+h1 {
+    text-align: center;
+    opacity: 0.9;
+}
+
+label {
+
+}
+
+button {
+    border: 0px;
+    margin-top: 5px;
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 5px;
+}
+
+button:hover {
+    background-color: rgba(255, 255, 255, 0.7);
+}
+
+.box {
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+input {
+  text-align: center;
+  background-color: rgba(255, 255, 255, 0.5);
+  border: 0px;
+  border-radius: 10px;
+}
+
+input:hover {
+    opacity: 1.0;
+}
+
+.optional {
+    opacity: 0.5;
+}
+
+#content {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+}
+
+#joinRoomForm {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    padding: 10px;
+    width: 25%;
+    min-width: 200px;
+    margin-bottom: 10px;
+}
+
+#controlButtons {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    width: 25%;
+    min-width: 200px;
+    margin-bottom: 10px;
+}
+
+#controlButtons button {
+    margin-left: auto;
+    margin-right: auto;
+    width: 100px;
+}
+
+#divLog {
+    padding: 10px;
+    width: 50%;
+    min-width: 200px;
+}
+
+#divLog ol {
+    height: 200px;
+    overflow: hidden;
+    overflow-y: scroll;
+}
+
+#footer {
+    border: 0px;
+    background-color: rgba(0, 0, 0, 0);
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    text-align: center;
+}

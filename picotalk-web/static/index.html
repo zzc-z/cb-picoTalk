@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!--
+-- Copyright (c) 2020 Thomas Kramer.
+--
+-- This file is part of picoTalk 
+-- (see https://codeberg.org/tok/picotalk).
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- This program is distributed in the hope that it will be useful,
+-- but WITHOUT ANY WARRANTY; without even the implied warranty of
+-- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-- GNU Affero General Public License for more details.
+--
+-- You should have received a copy of the GNU Affero General Public License
+-- along with this program. If not, see <http://www.gnu.org/licenses/>.
+-->
+<html>
+<head>
+    <title>picoTalk</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <link rel="icon" href="favicon.png" />
+</head>
+<body>
+
+<div id="content">
+
+    <h1>picoTalk <img src="owl.svg" height="40px" style="margin-bottom: -5px"/></h1>
+
+    <div class="box" id="joinRoomForm">
+        <label>Room name</label><input type="text" id="room_name" value="DefaultRoom"> <br />
+        <label class="optional">Server</label><input type="text" class="optional" id="server_name" value=""> <br />
+        <button id="btn_connect">Go</button>
+    </div>
+
+    <div class="box" id="controlButtons">
+        <button id="btnToggleMute">Mute</button>
+        <button id="btnLeave">Leave</button>
+    </div>
+
+    <div id="divShowLog">
+        <a id="btnShowLog">Show Log</a>
+    </div>
+
+    <div class="box" id="divLog">
+        <h3>Log</h3>
+        <ol id="log"></ol>
+    </div>
+
+</div>
+
+<script type="text/javascript" src="nacl.js" charset="utf-8"></script>
+<script type="text/javascript" src="nacl-util.js" charset="utf-8"></script>
+<script type="text/javascript" src="main.js" charset="utf-8"></script>
+
+<div id="footer">
+    <a href="https://codeberg.org/tok/picotalk">About</a>
+</div>
+
+</body>
+</html>

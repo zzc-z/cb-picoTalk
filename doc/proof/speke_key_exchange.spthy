@@ -1,0 +1,130 @@
+theory SPEKE
+begin
+
+builtins: hashing, diffie-hellman, bilinear-pairing, symmetric-encryption
+
+rule choose_password:
+    [ ]
+    --[ ChoosePassword() ]->
+    [ !Password($password) ]
+    //[ !Password(diff($passwordA, $passwordB)) ]
+
+// Generate key pair and send public key.
+rule Initiator_1:
+    let
+        p = h(password)
+        //P = pmult(p, $BasePoint) // Compute another base point based on password.
+        P = $BasePoint
+        pk_i = pmult(~sk_i, P) // Compute public key.
+    in
+    // Generate a fresh private key.
+    [ !Password(password), Fr(~sk_i) ]
+    --[ Initialize($I, ~sk_i) ]->
+    [ Init1($I, ~sk_i), // Store key for next step.
+      Out(pk_i) // Send public key.
+    ]
+
+// Receive public key, generate key pair and send own public key.
+// Compute shared secret.
+rule Responder_1:
+    let
+        p = h(password)
+        //P = pmult(p, $BasePoint)
+        P = $BasePoint
+        pk_r = pmult(~sk_r, P) // Compute public key.
+        s = pmult(~sk_r, pk_i) // Compute shared secret.
+    in
+    // Receive public key from network and generate a fresh key pair.
+    [ !Password(password), In(pk_i), Fr(~sk_r) ] 
+    --[ Respond(~sk_r), SharedR($R, s) ]->
+    // Send the public key.
+    [ Out(pk_r), !SessionKey($R, s) ]
+
+// Receive public key and compute shared secret.
+rule Initiator_2:
+    let
+        s = pmult(sk_i, pk_r) // Shared secret.
+    in
+    [ Init1($I, sk_i), // Retreive initiator and secret key from previous step.
+      In(pk_r) // Get public key from network.
+    ]
+    --[ SharedI($I, s) ]->
+    [ !SessionKey($I, s) ]
+
+
+rule SendMessage:
+    [ Fr(~msg), !SessionKey($I, key) ]
+    --[ SendMessage($I, ~msg, key) ]->
+    [ Out(senc(~msg, key)) ]
+
+
+rule ReceiveMessage:
+    [ In(senc(msg_plain, key)), !SessionKey($R, key) ]
+    --[ Received(msg_plain) ]->
+    [ ]
+// restriction ChoosePassword_only_once:
+//     "
+//     All #i #j. ChoosePassword() @ #i & ChoosePassword() @ #j ==> #i = #j
+//     "
+
+// It is possible that initiator and responder end up
+// with the same shared value. While initiator and 
+// responder are not the same entity.
+lemma SPEKE_reachability_key_exchange:
+    exists-trace
+    " Ex I R s #i #j.
+        SharedR(R, s) @ #i
+        & SharedI(I, s) @ #j
+        & not(I = R)
+    "
+
+lemma SPEKE_reachability_send_message:
+    exists-trace
+    " Ex msg #i.
+        Received(msg) @i
+    "
+
+lemma SPEKE_shared_key_secrecy:
+    "
+    // It cannot be that
+    not(
+        Ex I R s #i #j #k.
+            // responder and initator share a key 's'
+            SharedR(R, s) @ #i
+            & SharedI(I, s) @ #j
+            // and the adversary knows 's'.
+            & K(s) @ #k
+    )
+    "
+
+lemma SPEKE_initiator_shared_key_secrecy:
+    "
+    // It cannot be that
+    not(
+        Ex I s #j #k.
+            // initator computed a shared key 's'
+            SharedI(I, s) @ #j
+            // and the adversary knows 's'.
+            & K(s) @ #k
+    )
+    "
+
+lemma SPEKE_message_secrecy:
+    "
+    // It cannot be that
+    not(
+        Ex I msg key #j #k.
+            // the initiator sent a message
+            SendMessage(I, msg, key) @ #j
+            // and the adversary knows 'msg'.
+            & K(msg) @ #k
+        )
+    "
+
+//lemma test:
+//    ( All sk_i s #j. SharedI(s) @ #j
+//        ==>
+//        (Ex #j)
+//    )
+
+end

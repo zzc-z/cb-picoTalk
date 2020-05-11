@@ -1,0 +1,622 @@
+#
+# Copyright (c) 2020 Thomas Kramer.
+#
+# This file is part of picoTalk 
+# (see https://codeberg.org/tok/picotalk).
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import pyaudio
+import numpy as np
+import scipy.signal
+import sys
+import argparse
+import logging
+
+from typing import Callable, Coroutine, Dict, Optional
+import nacl.hash
+import nacl.secret
+
+from . import common
+from .audio.audio_processor import AudioProcessor, AudioProcessorPipeline
+from .audio.squelch import Squelch
+from .audio.noise_removal import NoiseRemover
+
+from .transports.packet import TLVPacket, PacketType
+from .transports.base import Connection
+from .transports import udp as transport_udp, tcp as transport_tcp, websocket as transport_ws, \
+    encrypted as transport_enc
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format='%(name)8s %(levelname)8s %(message)s')
+logger = logging.getLogger("Main")
+
+# PyAudio singleton.
+audio: Optional[pyaudio.PyAudio] = None
+
+# Audio format to be used.
+audio_format = pyaudio.paInt16
+
+# Thread pool for running blocking tasks
+# such as reading from the microphone and writing to the speakers and reading from stdin.
+thread_pool = ThreadPoolExecutor()
+
+
+async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
+                  _audio_processor: Optional[AudioProcessor] = None):
+    """
+    Read audio data and send it to the server.
+    """
+    logger.debug("Start microphone task.")
+    # Open audio input stream.
+    stream_in = audio.open(format=audio_format,
+                           channels=common.num_channels,
+                           rate=common.sample_rate,
+                           input=True,
+                           frames_per_buffer=common.frame_size)
+
+    try:
+        logger.debug('Start recording and sending audio.')
+
+        while True:
+            await asyncio.sleep(0)
+
+            def read_from_mic() -> np.ndarray:
+                while stream_in.get_read_available() > 2 * common.frame_size * common.sample_size:
+                    # TODO: can this happen? Or is data discarded already by PyAudio?
+                    # Discard data to catch up.
+                    logger.debug('Discard mic data.')
+                    stream_in.read(common.frame_size)
+                frame = stream_in.read(common.frame_size)
+                # Convert bytes into ndarray.
+                signal = np.frombuffer(frame, dtype=common.sample_data_type)
+                return signal
+
+            # Read from mic in other thread.
+            loop = asyncio.get_event_loop()
+            frame = await loop.run_in_executor(thread_pool, read_from_mic)
+            assert isinstance(frame, np.ndarray), "Frame must be an np.ndarray."
+            frames = [frame]
+
+            if _audio_processor is not None:
+                # Push the audio frame through the processor.
+                frames = await _audio_processor.process(frames)
+
+            for frame in frames:
+                assert isinstance(frame, np.ndarray), f'Frame must be a np.ndarray not {type(frame)}.'
+                # Check if datatype is correct.
+                assert frame.dtype == common.sample_data_type, f"Wrong dtype: {frame.dtype}."
+
+                # Send the packet if in transmission mode.
+                packet = TLVPacket(PacketType.AudioFrame, frame.tobytes(),
+                                   dest_addr=1  # This is directed to the server (1).
+                                   )
+                # Write this frame to the server.
+                await send_packet(packet)
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error("Microphone task interrupted: {}".format(type(e)))
+
+    logger.debug('Microphone task ended.')
+
+
+async def run_speaker(audio_buffer: asyncio.Queue):
+    """
+    Read audio frames from the queue and write them to the audio output.
+    """
+    logger.debug("Start speaker task.")
+
+    # Open audio output stream (to speaker).
+    stream_out = audio.open(format=audio_format,
+                            channels=common.num_channels,
+                            rate=common.sample_rate,
+                            output=True,
+                            frames_per_buffer=common.frame_size)
+
+    async def speaker_task():
+        silence = np.zeros(common.frame_size, dtype=common.sample_data_type)
+
+        playback_speed = 1.0
+        estimated_latency = 0.0
+        target_latency_min = 4
+        target_latency_max = audio_buffer.maxsize / 2
+        assert target_latency_min < target_latency_max
+        # Target latency in frames.
+        target_latency = 4
+
+        while True:
+
+            # print("{}, {:.2f}, {:.2f}".format(audio_buffer.qsize(), estimated_latency, target_latency))
+
+            while audio_buffer.full():
+                # If the buffer is full, then potentially
+                # there is also a backlog in the TCP buffer.
+                # Skip a frame to catch up with latency.
+                logger.debug("Full buffer: drop a frame.")
+                audio_buffer.get_nowait()
+                await asyncio.sleep(0)
+
+            # Computations for adaptive playback speed.
+            a = 0.01
+            estimated_latency = a * audio_buffer.qsize() + (1 - a) * estimated_latency
+
+            if estimated_latency < target_latency:
+                target_playback_speed = 1 + 0.005 * (estimated_latency - target_latency)
+            else:
+                target_playback_speed = 1 + 0.2 * (estimated_latency - target_latency)
+
+            playback_speed = target_playback_speed
+
+            if audio_buffer.qsize() > 0:
+                frame = audio_buffer.get_nowait()
+            else:
+                # logger.debug("Inject silence.")
+                # Slightly increase target latency if there is frames missing.
+                target_latency = min(target_latency_max, target_latency + 0.01)
+                frame = silence
+
+            a = 0.0001
+            target_latency = max(target_latency_min, (1 - a) * target_latency + a * target_latency_min)
+
+            target_frame_size = int(len(frame) / playback_speed)
+            frame = scipy.signal.resample(frame, target_frame_size)
+
+            # Write the frame to the output audio stream in a separate thread.
+            def write_to_speaker():
+                stream_out.write(frame.astype(np.int16), len(frame))
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(thread_pool, write_to_speaker)
+
+    _speaker_task = asyncio.create_task(speaker_task())
+
+    await _speaker_task
+
+
+class PeerConnection(Connection):
+    """
+    Connection to a peer routed via the server.
+    Makes sure that the destination address is always correctly set.
+    """
+
+    def __init__(self, receive_packet, send_packet):
+        super().__init__()
+        self.send_packet = send_packet
+        self.receive_packet = receive_packet
+
+    async def read_packet(self) -> TLVPacket:
+        return await self.receive_packet()
+
+    async def write_packet(self, p: TLVPacket):
+        return await self.send_packet(p)
+
+
+class Peer:
+    """
+    Data structure for another peer.
+    """
+
+    def __init__(self, peer_id: int, send_packet, password: bytes, is_initiator: bool):
+        self.msq_queue_in = asyncio.Queue()
+        self.peer_id = peer_id
+        self.password = password
+        self.peer_name = None
+
+        # Connection to server.
+        async def rx():
+            return await self.msq_queue_in.get()
+
+        async def tx(p: TLVPacket):
+            p.dest_addr = peer_id
+            await send_packet(p)
+
+        self.conn_server = PeerConnection(rx, tx)
+        # End-to-end encrypted connection to peer.
+        self.conn_e2e = asyncio.get_event_loop().create_future()
+        asyncio.create_task(self.run_key_exchange(password, is_initiator))
+        asyncio.create_task(self.run())
+
+    def close(self):
+        """
+        Close this peer connection.
+        """
+        pass
+
+    async def run(self):
+        """
+        Process incoming packets from other peers.
+        """
+        conn = await self.conn_e2e
+        while True:
+            p = await conn.read_packet()
+            logger.debug(f"Got encrypted packet from peer: {p.data}")
+
+            if p.type == PacketType.JSON:
+                d = p.to_dict()
+                if 'user_name' in d:
+                    self.peer_name = d['user_name']
+                    print("User joined:", self.peer_name)
+                if 'chat_message' in d:
+                    msg = d['chat_message']
+                    if msg.strip():
+                        print(f"{self.peer_name}: {msg}")
+
+    async def send_to_peer(self, p: TLVPacket):
+        """
+        Send a packet to the peer over the end-to-end encrypted channel.
+        """
+        conn = await self.conn_e2e
+        await conn.write_packet(p)
+
+    async def run_key_exchange(self, password: bytes, is_initiator: bool):
+        """
+        Run authenticated key exchange with other peer.
+        If the key exchange is successfull the 'self.conn_e2e' future will be set.
+        """
+        logger.debug(f"Run start key exchange with peer {self.peer_id}.")
+        shared_key = await transport_enc.password_authenticated_key_exchange(self.conn_server,
+                                                                             password)
+        logger.debug(f"Shared secret: {shared_key}.")
+
+        box = nacl.secret.SecretBox(key=shared_key)
+
+        conn_e2e = transport_enc.SecureConnection(box, self.conn_server,
+                                                  is_initiator=is_initiator,
+                                                  nonce=0)
+
+        self.conn_e2e.set_result(conn_e2e)
+
+    async def handle_packet_from_peer(self, p: TLVPacket):
+        logger.debug(f"Handle packet from peer {p.src_addr}, type={p.type}.")
+        self.msq_queue_in.put_nowait(p)
+
+
+class PTClient:
+
+    def __init__(self, password: bytes, user_name: str):
+
+        self.password = password
+        self.user_name = user_name
+
+        # Main control connection to server.
+        self.conn_ctrl: Optional[transport_enc.SecureConnection] = None
+
+        # Other peers stored by their ID.
+        self.peers: Dict[int, Peer] = dict()
+
+    async def run_command_line_input(self):
+        while True:
+            loop = asyncio.get_event_loop()
+            line = await loop.run_in_executor(thread_pool, sys.stdin.readline)
+
+            # Send the line to all peers.
+            tasks = []
+
+            for p in self.peers.values():
+                t = asyncio.wait_for(p.send_to_peer(TLVPacket.from_dict(chat_message=line)),
+                                     timeout=10)
+                tasks.append(t)
+            try:
+                for t in tasks:
+                    await t
+            except TimeoutError as e:
+                pass
+
+    async def handle_control_packet(self,
+                                    p: TLVPacket):
+
+        if p.src_addr == common.server_id:
+            # Packet comes from server.
+
+            assert p.type == PacketType.JSON
+            d = p.to_dict()
+            logger.debug("Control packet: {}".format(d))
+
+            event = d.get('event')
+            if event == 'peer_joined':
+                peer_id = d.get('peer_id')
+                logger.debug(f"Peer joined: {peer_id}")
+
+                # Create new peer object.
+                if peer_id in self.peers:
+                    logger.warning(f"Peer with ID {peer_id} is already registered.")
+                else:
+                    # Start connection to peer.
+                    peer = Peer(peer_id, self.conn_ctrl.write_packet,
+                                password=self.password, is_initiator=True)
+                    self.peers[peer_id] = peer
+                    # Send my user name to the peer.
+                    asyncio.create_task(peer.send_to_peer(TLVPacket.from_dict(user_name=self.user_name)))
+            elif event == 'peer_authenticated':
+                peer_id = d.get('peer_id')
+                logger.debug(f"Peer authenticated: {peer_id}")
+                # TODO: Remove if not used.
+            elif event == 'peer_disconnected':
+                peer_id = d.get('peer_id')
+                logger.debug(f"Peer disconnected: {peer_id}")
+                peer = self.peers.get(peer_id)
+                if peer is None:
+                    logger.warning(f"Peer ID not registered: {peer_id}")
+                else:
+                    print(f"Peer disconnected: {peer.peer_name} ({peer_id})")
+
+        else:
+            # Packet comes from another peer.
+            peer_id = p.src_addr
+            peer = self.peers.get(peer_id)
+            if peer is None:
+                peer = Peer(peer_id, self.conn_ctrl.write_packet,
+                            password=self.password, is_initiator=False)
+                self.peers[peer_id] = peer
+                asyncio.create_task(peer.send_to_peer(TLVPacket.from_dict(user_name=self.user_name)))
+
+            # Pass the packet to the peer object.
+            await peer.handle_packet_from_peer(p)
+
+    async def receive_from_server(self,
+                                  receive_packet: Callable[[], Coroutine],
+                                  audio_buffer: asyncio.Queue):
+        """
+        Read packets from the server and handle them.
+        """
+        logger.debug('Start receiver task.')
+        while True:
+            # Wait for packet from the server.
+            try:
+                packet = await receive_packet()
+
+                assert isinstance(packet, TLVPacket)
+
+                if packet.type == PacketType.AudioFrame:
+                    # Put audio packets into the audio buffer.
+                    data = packet.data
+                    # Convert frame to a numpy array.
+                    frame = np.frombuffer(data, dtype=common.sample_data_type).astype(np.int)
+
+                    if audio_buffer.full():
+                        # Drop oldest frame if the buffer is full.
+                        # logger.debug("Drop oldest frame in FIFO.")
+                        audio_buffer.get_nowait()
+
+                    await audio_buffer.put(frame)
+                else:
+                    await self.handle_control_packet(packet)
+            except ConnectionError as e:
+                logger.debug("Connection error: {}".format(e))
+                logger.debug("Stop receiver task.")
+                return
+            except Exception as e:
+                logger.debug("Exception: {}: {}".format(type(e), e))
+
+    async def run(self,
+                  server_addr: str, server_port: int,
+                  room_name: str,
+                  user_name: str,
+                  audio_processor: Optional[AudioProcessor] = None,
+                  try_use_udp: bool = True):
+
+        # Start task for reading user inputs.
+        cmdline_input_task = asyncio.create_task(self.run_command_line_input())
+
+        """
+        Run the client protocol.
+        """
+
+        # Open connection to server.
+        logger.debug(f'Connecting to {server_addr}:{server_port}.')
+        tcp_conn = await transport_tcp.open_tcp_connection(server_addr, server_port)
+        logger.debug(f'Connected to {server_addr}:{server_port}.')
+
+        # Receive server-hello message.
+        packet = await tcp_conn.read_packet()
+        msg = packet.to_dict()
+        logger.debug(f'Server-hello: {msg}')
+        if 'version' in msg:
+            # Check if server and client version are compatible.
+            version = msg['version']
+            assert len(version) == 3
+            logger.debug('Client version: {}.{}.{}'.format(*common.version))
+            logger.debug('Server version: {}.{}.{}'.format(*version))
+            assert version == list(common.version), "Incompatible server version!"
+        else:
+            raise Exception('Protocol error: No version field in server-hello message.')
+
+        # Derive shared secret.
+        box = await transport_enc.authenticated_key_exchange(tcp_conn, initiator_role=True)
+
+        conn_encrypted = transport_enc.SecureConnection(box, tcp_conn, is_initiator=True, nonce=1)
+        self.conn_ctrl = conn_encrypted
+
+        # Room id is the hex-hash of the room name.
+        # Salted with 'room_name' to make sure
+        # this hash function is distinct from others that could
+        # potentially be used.
+        # TODO: Use PBKDF or scrypt to derive the room ID.
+        room_id = nacl.hash.sha512(
+            room_name.encode('utf-8')
+        )[:64].decode()
+
+        logger.debug(f'room_id = {room_id}')
+
+        # Write encrypted client-hello message.
+        logger.debug(f'Send client-hello message.')
+        await conn_encrypted.write_packet(TLVPacket.from_dict(
+            room_id=room_id
+        ))
+
+        # Wait for accept-message.
+        packet = await conn_encrypted.read_packet()
+        msg = packet.to_dict()
+        logger.debug(f'Server accepted: {msg}')
+
+        user_id = msg['user_id']
+        logger.debug(f'User ID: {user_id}')
+
+        udp_stream_id = msg['udp_stream_id']
+        logger.debug(f'UDP stream ID: {udp_stream_id}')
+
+        udp_server_port = msg['udp_port']
+        logger.debug(f'UDP server port: {udp_server_port}')
+
+        # Create FIFO buffer for audio frames.
+        # This is used to transport audio frames from the receiver task to the speaker task.
+        frame_duration = common.frame_size / common.sample_rate
+        buffer_size_seconds = 2
+        # Calculate buffer size to be able to store 2 seconds of audio.
+        max_buffer_size = int(buffer_size_seconds / frame_duration + 1) + 1
+        audio_buffer = asyncio.Queue(maxsize=max_buffer_size)
+
+        # Open UDP connection.
+        udp_conn = await transport_udp.open_udp_connection(server_addr, udp_server_port, stream_id=udp_stream_id)
+        # Create encrypted UDP connection which allows packets to be lost
+        # but enforces packets to remain ordered.
+        udp_conn = transport_enc.SecureConnection(box, udp_conn,
+                                                  is_initiator=True, nonce=2,
+                                                  permit_dropped_packets=True)
+
+        use_udp = False
+
+        # Check if UDP connection works.
+        logger.debug(f"UDP check: init")
+        await udp_conn.write_packet(TLVPacket.from_dict(udp_check='init'))
+
+        try:
+            logger.debug(f"UDP check: wait for server ack")
+            server_ack = await asyncio.wait_for(udp_conn.read_packet(), 2)
+            msg = server_ack.to_dict()
+            logger.debug(f"UDP check: server ack received ({msg})")
+            if msg.get('udp_check') == 'ok':
+                # Acknowledge to server to use UDP.
+                use_udp = True
+        except asyncio.TimeoutError:
+            # Tell the server not to use UDP.
+            logger.debug(f"UDP check: timeout")
+
+        if not try_use_udp:
+            use_udp = False
+
+        logger.debug(f"Using UDP: {use_udp}")
+        # Tell the server whether to send audio frames over UDP or not.
+        await conn_encrypted.write_packet(TLVPacket.from_dict(use_udp=use_udp))
+
+        if not use_udp:
+            # Close UDP connection again.
+            udp_conn.close()
+
+        # Launch tasks for server communication and audio.
+        if use_udp:
+            task_mic = asyncio.create_task(run_mic(udp_conn.write_packet, _audio_processor=audio_processor))
+        else:
+            task_mic = asyncio.create_task(run_mic(conn_encrypted.write_packet, _audio_processor=audio_processor))
+
+        task_tcp_receiver = asyncio.create_task(self.receive_from_server(conn_encrypted.read_packet, audio_buffer))
+
+        task_udp_receiver = asyncio.create_task(self.receive_from_server(udp_conn.read_packet, audio_buffer))
+
+        task_speaker = asyncio.create_task(run_speaker(audio_buffer))
+
+        try:
+            # Run tasks concurrently but catch all exceptions.
+            await asyncio.gather(task_tcp_receiver, task_udp_receiver, task_mic, task_speaker)
+            exit()
+        except Exception as e:
+            logger.debug("Exiting: ", e)
+            exit()
+
+
+def main():
+    parser = argparse.ArgumentParser(description="PicoTalk client.")
+    parser.add_argument('-s', '--server', type=str,
+                        metavar='REMOTE_HOST',
+                        default='localhost',
+                        help="Server address.")
+    parser.add_argument('-p', '--port', type=int,
+                        metavar='REMOTE_PORT',
+                        default=common.server_tcp_port,
+                        help="Server port.")
+    parser.add_argument('-r', '--room', type=str,
+                        metavar='ROOM_NAME',
+                        required=True,
+                        help="Name of the room to join.")
+    parser.add_argument('-u', '--user', type=str,
+                        metavar='USER_NAME',
+                        default='Anonymous 🕵',
+                        help="Your user name to be displayed to others.")
+    parser.add_argument('--denoise',
+                        action='store_true',
+                        default=False,
+                        help="Enable noise removal in the audio pre-processing.")
+
+    parser.add_argument('--mic-squelch',
+                        action='store_true',
+                        default=False,
+                        help="Transmit audio only of there is a speech signal.")
+
+    parser.add_argument('--noudp',
+                        action='store_true',
+                        default=False,
+                        help="Disable using UDP for the audio stream.")
+    parser.add_argument('-v', '--verbose',
+                        action='store_true',
+                        default=False,
+                        help="Show more verbose log output.")
+    parser.add_argument('--debug',
+                        action='store_true',
+                        default=False,
+                        help="Show fine-grained debug output.")
+
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+    if args.debug:
+        print("DEBUG MODE ON")
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+
+    # Read password.
+    # This password is used for authenticating the key exchange for end-to-end encryption.
+    print("Enter room password:")
+    password = sys.stdin.readline().replace('\n', '').encode('utf-8')
+
+    # Set-up audio processor pipeline.
+    pipeline = []
+    if args.denoise:
+        # pipeline.append(FrameResizer(output_frame_size=512))
+        pipeline.append(NoiseRemover(frame_size=common.frame_size, sample_rate=common.sample_rate))
+        # pipeline.append(FrameResizer(output_frame_size=common.frame_size))
+
+    if args.mic_squelch:
+        pipeline.append(Squelch(frame_size=common.frame_size, sample_rate=common.sample_rate))
+
+    audio_processor = AudioProcessorPipeline(*pipeline)
+
+    # Initialize audio singleton.
+    audio = pyaudio.PyAudio()
+
+    client = PTClient(password=password, user_name=args.user)
+
+    asyncio.run(client.run(server_addr=args.server,
+                           server_port=args.port,
+                           room_name=args.room,
+                           user_name=args.user,
+                           audio_processor=audio_processor,
+                           try_use_udp=not args.noudp
+                           ))
+
+
+if __name__ == '__main__':
+    main()
