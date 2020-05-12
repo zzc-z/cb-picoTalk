@@ -20,6 +20,12 @@
 
 version = [0, 0, 18]
 
+// Load configuration from config.json.
+fetch("config.json")
+  .then(response => response.json())
+  .then(json => console.log(json));
+
+
 var default_websocket_port = 9998
 
 // Set server in GUI.
@@ -32,11 +38,13 @@ var server_id = 1
 // Tell if microphone is muted or not.
 var muted = false
 
+// Define logging functions.
 function log(str) {
     const logElement = document.querySelector('#log');
     logElement.innerHTML += '<li>' + str + '</li>';
 }
 
+// Define logging functions.
 debug = (str) => {console.log("DEBUG: " + str)}
 info = (str) => {var str = "INFO: " + str; log(str);}
 warning = (str) => {str = "WARNING: " + str; log(str);}
@@ -57,11 +65,13 @@ function hex(byteArray) {
   }).join('')
 }
 
+// Convert a byte array to a string.
 function bytes2str(str) {
     var text_dec = new TextDecoder()
     return text_dec.decode(str)
 }
 
+// Convert a string to a byte array.
 function str2bytes(bytes) {
     var text_enc = new TextEncoder()
     return text_enc.encode(bytes)
@@ -72,6 +82,8 @@ function uint8ArrayToBuffer(array) {
     return array.buffer.slice(array.byteOffset, array.byteLength + array.byteOffset)
 }
 
+// Default hash function.
+// For now this is the first 256 bits of the SHA512 hash.
 function hash(bytes) {
     return nacl.hash(bytes).slice(0, 32)
 }
@@ -90,14 +102,17 @@ class Queue {
         return this.fifo.length
     }
 
+    // Check if the queue is full.
     is_full() {
         return !(this.qsize() == 0 || this.qsize() < this.maxsize)
     }
 
+    // Check if the queue is empty.
     is_empty() {
         return this.qsize() == 0
     }
 
+    // Put an element without waiting. This throws an exception if the queue is full.
     put_nowait(obj) {
 
         if (this.is_full()) {
@@ -114,6 +129,7 @@ class Queue {
         }
     }
 
+    // Put an element or wait for space to be freed if the queue is full.
     async put(obj) {
         if (!this.is_full()) {
             // No need to wait for space to be freed.
@@ -126,6 +142,7 @@ class Queue {
         }
     }
 
+    // Get an element without waiting. This throws an exception if the queue is empty.
     get_nowait() {
 
         if (this.is_empty()) {
@@ -141,6 +158,7 @@ class Queue {
         return obj
     }
 
+    // Get an element or wait for one to arrive if the queue is empty.
     async get() {
         if (this.qsize() > 0) {
             return this.get_nowait() // Remove and return the oldest element.
@@ -153,10 +171,12 @@ class Queue {
     }
 }
 
+// Constants for packet types.
 PacketTypeAudioFrame = 1
 PacketTypeJSON = 2
 PacketTypeBinary = 3
 
+// A type-length-value encoded packet.
 class Packet {
     constructor(type, arraybuffer, src_addr = 0, dest_addr = 0) {
         this.type = type
@@ -207,6 +227,7 @@ class Packet {
         return buf
     }
 
+    // Encode as an UInt8Array.
     encodeAsUint8Array() {
         return new Uint8Array(this.encode())
     }
@@ -225,13 +246,17 @@ function parsePacket(arraybuffer) {
     return p
 }
 
+// Secure channel implementation on top of NaCl secretbox.
 class SecureConnection {
     constructor(secretKey, conn, is_initiator, nonce, permit_dropped_packets = false) {
         this.secretKey = secretKey
         this.conn = conn
 
+        // Initiator and responder must be distinguished to avoid packet mirroring attacks.
         this.__role = is_initiator ? 1 : 2
         this.__role_other = is_initiator ? 2 : 1
+
+        // Counters are used to generate nonces.
         this.__counter = 1
         this.__counter_other = 1
 
@@ -241,6 +266,7 @@ class SecureConnection {
         this.permit_dropped_packets = permit_dropped_packets
     }
 
+    // Create a 24 byte nonce.
     _create_nonce(connection_id, role, counter) {
         var nonce = new Uint8Array(24)
         var d = new DataView(nonce.buffer)
@@ -251,6 +277,7 @@ class SecureConnection {
         return nonce
     }
 
+    // Read single values back from the nonce.
     _parse_nonce(nonce) {
         var d = new DataView(nonce)
         return {
@@ -260,6 +287,7 @@ class SecureConnection {
         }
     }
 
+    // Encrypt the packet and send it over the underlying connection.
     async sendPacket(packet) {
         // Assemble nonce.
         var nonce = this._create_nonce(this.__nonce, this.__role, this.__counter)
@@ -281,7 +309,7 @@ class SecureConnection {
         await this.conn.sendPacket(p_encrypted)
     }
 
-    // Receive packets and try to decrypt them.
+    // Receive packets from the underlying connection and try to decrypt them.
     // The first packet that successfully decrypts is returned.
     async receivePacket() {
 
