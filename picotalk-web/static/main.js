@@ -18,25 +18,14 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-version = [0, 0, 18]
-
-// Load configuration from config.json.
-fetch("config.json")
-  .then(response => response.json())
-  .then(json => console.log(json));
 
 
-var default_websocket_port = 9998
+const version = [0, 0, 18]
 
-// Set server in GUI.
-document.getElementById("server_name").value = document.location.hostname + ":" + default_websocket_port;
+const sample_rate = 16000 // Audio sample rate.
+const frame_size = 512 // Number of samples in an audio frame.
+const server_id = 1
 
-var sample_rate = 16000
-var frame_size = 512 // Number of samples in an audio frame.
-var server_id = 1
-
-// Tell if microphone is muted or not.
-var muted = false
 
 // Define logging functions.
 function log(str) {
@@ -49,6 +38,12 @@ debug = (str) => {console.log("DEBUG: " + str)}
 info = (str) => {var str = "INFO: " + str; log(str);}
 warning = (str) => {str = "WARNING: " + str; log(str);}
 error = (str) => {str = "ERROR: " + str; log(str); alert(str)}
+
+// Test if the NaCl library is loaded.
+if (typeof nacl === 'undefined') {
+    error("NaCl library is not loaded.")
+}
+
 
 // Concatenate two typed arrays such as UInt8Arrays.
 function concatTypedArray(a, b) {
@@ -88,93 +83,10 @@ function hash(bytes) {
     return nacl.hash(bytes).slice(0, 32)
 }
 
-// Asynchronous FIFO queue.
-class Queue {
-    constructor(maxsize=0) {
-        this.maxsize=maxsize
-        this.fifo = []
-        this.get_resolve_callbacks = []
-        this.put_resolve_callbacks = []
-    }
-
-    // Return the number of elements currently in the queue.
-    qsize() {
-        return this.fifo.length
-    }
-
-    // Check if the queue is full.
-    is_full() {
-        return !(this.qsize() == 0 || this.qsize() < this.maxsize)
-    }
-
-    // Check if the queue is empty.
-    is_empty() {
-        return this.qsize() == 0
-    }
-
-    // Put an element without waiting. This throws an exception if the queue is full.
-    put_nowait(obj) {
-
-        if (this.is_full()) {
-            throw "Queue is full!"
-        }
-
-        // Store the object.
-        this.fifo.push(obj)
-        // Notify the callback, if there is any waiting.
-        if (this.get_resolve_callbacks.length > 0) {
-            var callback = this.get_resolve_callbacks.shift()
-            var obj = this.fifo.shift()
-            callback(obj)
-        }
-    }
-
-    // Put an element or wait for space to be freed if the queue is full.
-    async put(obj) {
-        if (!this.is_full()) {
-            // No need to wait for space to be freed.
-            this.put_nowait(obj)
-        } else {
-            var p = new Promise((resolve, reject) => {
-                this.put_resolve_callbacks.push(resolve);
-            });
-            await p
-        }
-    }
-
-    // Get an element without waiting. This throws an exception if the queue is empty.
-    get_nowait() {
-
-        if (this.is_empty()) {
-            throw "Queue is empty!"
-        }
-
-        var obj = this.fifo.shift() // Get oldest element.
-        // Notify the callback, if there is any waiting.
-        if (this.put_resolve_callbacks.length > 0) {
-            var callback = this.get_resolve_callbacks.shift()
-            callback()
-        }
-        return obj
-    }
-
-    // Get an element or wait for one to arrive if the queue is empty.
-    async get() {
-        if (this.qsize() > 0) {
-            return this.get_nowait() // Remove and return the oldest element.
-        }
-        // FIFO is empty, have to wait until an object is put into the queue.
-        var p = new Promise((resolve, reject) => {
-            this.get_resolve_callbacks.push(resolve);
-        });
-        return p
-    }
-}
-
 // Constants for packet types.
-PacketTypeAudioFrame = 1
-PacketTypeJSON = 2
-PacketTypeBinary = 3
+const PacketTypeAudioFrame = 1
+const PacketTypeJSON = 2
+const PacketTypeBinary = 3
 
 // A type-length-value encoded packet.
 class Packet {
@@ -245,6 +157,7 @@ function parsePacket(arraybuffer) {
     var p = new Packet(type, data, src_addr, dest_addr)
     return p
 }
+
 
 // Secure channel implementation on top of NaCl secretbox.
 class SecureConnection {
@@ -384,309 +297,358 @@ async function authenticatedKeyExchange(conn) {
     return shared_secret
 }
 
+async function main() {
 
-// Test if the NaCl library is loaded.
-if (typeof nacl === 'undefined') {
-    error("NaCl library is not loaded.")
-}
-
-async function run(websocket_url, room_name) {
-
-    // Open the WebSocket.
-    queue_from_server = new Queue()
-
-    info("Connecting to WebSocket: " + websocket_url)
-    var sock = new WebSocket(websocket_url)
-    sock.binaryType = "arraybuffer"
-
-    // Send a message.
-    sock.onopen = function (event) {
-      debug("WS Connected!")
-    };
-
-    // Receive a message.
-    sock.onmessage = function (event) {
-        queue_from_server.put_nowait(event.data)
+    // Load configuration from config.json.
+    async function loadConfig() {
+        var response = await fetch("config.json")
+        var json = await response.json()
+        console.log(json)
+        return json
     }
 
-    sock.onerror = function (event) {
-        error(`WS Error: ${event.message}`)
-        error("Cannot connect to " + websocket_url)
-    }
+    config = loadConfig()
 
-    sock.onclose = function(event) {
-        debug("WS closed.")
-    }
-
-    /// Send a packet over the WebSocket.
-    async function sendPacket(p) {
-        var data = p.encode()
-        sock.send(data)
-    }
-
-    // Receive an ArrayBuffer from the WebSocket.
-    async function receiveBytes() {
-        return await queue_from_server.get()
-    }
-
-    /// Receive a Packet from the WebSocket.
-    async function receivePacket() {
-        return parsePacket(await receiveBytes())
-    }
-
-
-    var conn_plain = {
-        receivePacket: receivePacket,
-        sendPacket: sendPacket
-    }
-
-    // Receive server-hello message.
-    p = await conn_plain.receivePacket()
-    json = p.toJson()
-    // Check version for compatibility.
-    if (version.toString() != json.version.toString()) { // Cannot compare arrays, so have to convert to string.
-        log(`Server version ${json.version} is incompatible with client version ${version}.`)
-        sock.close()
-        return
-    }
-
-    // Perform key-exchange.
-    shared_secret = await authenticatedKeyExchange(conn_plain)
-    // Open secure connection to the server.
-    var conn = new SecureConnection(shared_secret, conn_plain, true, 1, false)
-
-    info("Room name: " + room_name)
-    // Derive room ID.
-    var room_id = hex(hash(str2bytes(room_name)))
-    debug("Room ID: " + room_id)
-
-    // Write encrypted client-hello message.
-    debug('Send client-hello message.')
-    var p = Packet.createJson({room_id: room_id})
-    await conn.sendPacket(p)
-
-    // Wait for accept-message.
-    debug("Wait for server-accept message.")
-    var p = await conn.receivePacket()
-    var msg = p.toJson()
-    debug("Server-accept message: " + JSON.stringify(msg))
-    var user_id = msg.user_id
-    info("User ID: " + user_id)
-
-    // Tell server not to use UDP.
-    var p = Packet.createJson({use_udp: false})
-    await conn.sendPacket(p)
-
-    async function receive_from_server(receivePacket, audio_queue) {
-        debug("Start receiver task.")
-        while (true) {
-            var p = await receivePacket()
-
-            if (p.type == PacketTypeAudioFrame) {
-//                info("Received an audio frame.")
-                if (audio_queue.is_full()) {
-                    // Drop the oldest packet.
-                    audio_queue.get_nowait()
-                }
-                audio_queue.put_nowait(p)
-            } else {
-                info("Received a control packet: " + p.dataAsString())
-            }
+    // Get a config value by key.
+    async function getConfig(key, default_value=null) {
+        debug("getConfig: " + key)
+        var json = await config
+        var value = json[key]
+        if (!value) {
+            return default_value
+        } else {
+            return value
         }
     }
 
-    var audio_queue = new Queue(maxsize=4)
-    async function rx() {
-        return await conn.receivePacket()
-    }
+    // Tell if microphone is muted or not.
+    var muted = false
 
-    // Start receiver task.
-    receive_from_server(rx, audio_queue)
+    async function run(websocket_url, room_name, onstart, onend) {
 
-    async function run_speaker(audio_queue) {
-        var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:16000});
+        // Open the WebSocket.
+        queue_from_server = new Queue()
 
-        var bufferSize = 512;
-        var whiteNoise = audioContext.createScriptProcessor(bufferSize, 1, 1);
-        whiteNoise.onaudioprocess = function(e) {
-            var output = e.outputBuffer.getChannelData(0);
-            for (var i = 0; i < bufferSize; i++) {
-                output[i] = 0;
+        info("Connecting to WebSocket: " + websocket_url)
+        var sock = new WebSocket(websocket_url)
+        sock.binaryType = "arraybuffer"
+
+        // Send a message.
+        sock.onopen = function (event) {
+          debug("WS Connected!")
+        };
+
+        // Receive a message.
+        sock.onmessage = function (event) {
+            queue_from_server.put_nowait(event.data)
+        }
+
+        sock.onerror = function (event) {
+            error(`WS Error: ${event.message}`)
+            error("Cannot connect to " + websocket_url)
+        }
+
+        sock.onclose = function(event) {
+            debug("WS closed.")
+            onend()
+        }
+
+        /// Send a packet over the WebSocket.
+        async function sendPacket(p) {
+            var data = p.encode()
+            sock.send(data)
+        }
+
+        // Receive an ArrayBuffer from the WebSocket.
+        async function receiveBytes() {
+            return await queue_from_server.get()
+        }
+
+        /// Receive a Packet from the WebSocket.
+        async function receivePacket() {
+            return parsePacket(await receiveBytes())
+        }
+
+
+        var conn_plain = {
+            receivePacket: receivePacket,
+            sendPacket: sendPacket
+        }
+
+        // Receive server-hello message.
+        var p = await conn_plain.receivePacket()
+        var json = p.toJson()
+        // Check version for compatibility.
+        if (version.toString() != json.version.toString()) { // Cannot compare arrays, so have to convert to string.
+            log(`Server version ${json.version} is incompatible with client version ${version}.`)
+            sock.close()
+            return
+        }
+
+        // Perform key-exchange.
+        var shared_secret = await authenticatedKeyExchange(conn_plain)
+        // Open secure connection to the server.
+        var conn = new SecureConnection(shared_secret, conn_plain, true, 1, false)
+
+        info("Room name: " + room_name)
+        // Derive room ID.
+        var room_id = hex(hash(str2bytes(room_name)))
+        debug("Room ID: " + room_id)
+
+        // Write encrypted client-hello message.
+        debug('Send client-hello message.')
+        var p = Packet.createJson({room_id: room_id})
+        await conn.sendPacket(p)
+
+        // Wait for accept-message.
+        debug("Wait for server-accept message.")
+        var p = await conn.receivePacket()
+        var msg = p.toJson()
+        debug("Server-accept message: " + JSON.stringify(msg))
+        var user_id = msg.user_id
+        info("User ID: " + user_id)
+
+        // Tell server not to use UDP.
+        var p = Packet.createJson({use_udp: false})
+        await conn.sendPacket(p)
+
+        async function receive_from_server(receivePacket, audio_queue) {
+            debug("Start receiver task.")
+            while (true) {
+                var p = await receivePacket()
+
+                if (p.type == PacketTypeAudioFrame) {
+    //                info("Received an audio frame.")
+                    if (audio_queue.is_full()) {
+                        // Drop the oldest packet.
+                        audio_queue.get_nowait()
+                    }
+                    audio_queue.put_nowait(p)
+                } else {
+                    info("Received a control packet: " + p.dataAsString())
+                }
             }
-            if (!audio_queue.is_empty()) {
-                var packet = audio_queue.get_nowait()
+        }
 
-                var audio = new Int16Array(packet.data)
+        var audio_queue = new Queue(maxsize=4)
+        async function rx() {
+            return await conn.receivePacket()
+        }
+
+        // Start receiver task.
+        receive_from_server(rx, audio_queue)
+
+        async function run_speaker(audio_queue) {
+            debug("Start speaker task.")
+            var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:16000});
+
+            var bufferSize = 512;
+            var whiteNoise = audioContext.createScriptProcessor(bufferSize, 1, 1);
+            whiteNoise.onaudioprocess = function(e) {
+                var output = e.outputBuffer.getChannelData(0);
                 for (var i = 0; i < bufferSize; i++) {
-                    output[i] = audio[i] *1.0/ (1<<15);
+                    output[i] = 0;
+                }
+                if (!audio_queue.is_empty()) {
+                    var packet = audio_queue.get_nowait()
+
+                    var audio = new Int16Array(packet.data)
+                    for (var i = 0; i < bufferSize; i++) {
+                        output[i] = audio[i] *1.0/ (1<<15);
+                    }
                 }
             }
+
+            whiteNoise.connect(audioContext.destination);
         }
 
-        whiteNoise.connect(audioContext.destination);
-    }
+        // Start speaker task.
+        run_speaker(audio_queue)
 
-    // Start speaker task.
-    run_speaker(audio_queue)
+        // Get data from the microphone and send audio packets though `sendPacket`.
+        async function run_microphone(sendPacket) {
+            debug("Start microphone task.")
 
-    // Get data from the microphone and send audio packets though `sendPacket`.
-    async function run_microphone(sendPacket) {
-        info("Start microphone task.")
-
-        var constraints = {
-                audio: {
-                    // Constraints seem to have little effect in Firefox.
-                    sampleRate: 16000,
-                    sampleSize: 16,
-                    echoCancellation: true,
-                    autoGainControl: true,
-                    noiseSuppression: true
-                }
-            }
-
-        try {
-            debug("Try to open media stream.")
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-            info("Microphone stream sample rate: " + stream.sampleRate)
-            debug("Media stream opened: " + stream)
-            /* use the stream */
-
-            var audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:16000})
-
-            audioInput = audioContext.createMediaStreamSource(stream);
-
-            recorder = audioContext.createScriptProcessor(1024, 1, 1);
-
-            // Create empty buffer.
-            var bufferResampled = new Float32Array(0)
-
-            recorder.onaudioprocess = function (e) {
-                if (muted) {
-                    return
+            var constraints = {
+                    audio: {
+                        // Constraints seem to have little effect in Firefox.
+                        sampleRate: 16000,
+                        sampleSize: 16,
+                        echoCancellation: true,
+                        autoGainControl: true,
+                        noiseSuppression: true
+                    }
                 }
 
-                ////// START RESAMPLE
-                // Resample the audio signal and fill it into the buffer.
-                // From https://stackoverflow.com/questions/27598270/resample-audio-buffer-from-44100-to-16000
-                var sourceAudioBuffer = e.inputBuffer;  // directly received by the audioprocess event from the microphone in the browser
+            try {
+                debug("Try to open media stream.")
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                debug("Microphone stream sample rate: " + stream.sampleRate)
+                debug("Media stream opened: " + stream)
+                /* use the stream */
 
-                var TARGET_SAMPLE_RATE = sample_rate;
-                var offlineCtx = new OfflineAudioContext(sourceAudioBuffer.numberOfChannels,
-                     sourceAudioBuffer.duration * sourceAudioBuffer.numberOfChannels * TARGET_SAMPLE_RATE,
-                     TARGET_SAMPLE_RATE
-                     )
-                var audioBuffer = offlineCtx.createBuffer(sourceAudioBuffer.numberOfChannels,
-                    sourceAudioBuffer.length,
-                    sourceAudioBuffer.sampleRate)
-                // Copy the source data into the offline AudioBuffer
-                for (var channel = 0; channel < sourceAudioBuffer.numberOfChannels; channel++) {
-                    audioBuffer.copyToChannel(sourceAudioBuffer.getChannelData(channel), channel)
-                }
-                // Play it from the beginning.
-                var source = offlineCtx.createBufferSource()
-                source.buffer = sourceAudioBuffer
-                source.connect(offlineCtx.destination)
-                source.start(0)
+                var audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:16000})
 
-                offlineCtx.oncomplete = function(e) {
-                    // `resampled` contains an AudioBuffer resampled at 16000Hz.
-                    // use resampled.getChannelData(x) to get an Float32Array for channel x.
-                    var resampled = e.renderedBuffer;
-                    var leftFloat32Array = resampled.getChannelData(0);
-                    // Use this float32array to send the samples to the server or whatever.
-                    bufferResampled = concatTypedArray(bufferResampled, leftFloat32Array)
-                }
+                var audioInput = audioContext.createMediaStreamSource(stream);
 
-                offlineCtx.startRendering();
+                var recorder = audioContext.createScriptProcessor(1024, 1, 1);
 
-                ////// END RESAMPLE
+                // Create empty buffer.
+                var bufferResampled = new Float32Array(0)
 
-                // Dispatch audio frames, convert them to Int16 arrays and send them as packets to the server.
-                while (bufferResampled.length >= frame_size) {
-                    frame = bufferResampled.slice(0, frame_size)
-
-                    // Convert float values to int16.
-                    var intAudio = new Int16Array(frame.length)
-                    for (var j = 0; j < frame.length; j++) {
-                        intAudio[j] = Math.round(frame[j] * (1<<15))
+                recorder.onaudioprocess = function (e) {
+                    if (muted) {
+                        return
                     }
 
-                    // Put the audio frame into a packet and send it.
-                    var p = new Packet(PacketTypeAudioFrame, intAudio.buffer, src_addr=0, dest_addr=server_id)
-                    sendPacket(p)
-                    bufferResampled = bufferResampled.slice(frame_size)
+                    ////// START RESAMPLE
+                    // Resample the audio signal and fill it into the buffer.
+                    // From https://stackoverflow.com/questions/27598270/resample-audio-buffer-from-44100-to-16000
+                    var sourceAudioBuffer = e.inputBuffer;  // directly received by the audioprocess event from the microphone in the browser
+
+                    var TARGET_SAMPLE_RATE = sample_rate;
+                    var offlineCtx = new OfflineAudioContext(sourceAudioBuffer.numberOfChannels,
+                         sourceAudioBuffer.duration * sourceAudioBuffer.numberOfChannels * TARGET_SAMPLE_RATE,
+                         TARGET_SAMPLE_RATE
+                         )
+                    var audioBuffer = offlineCtx.createBuffer(sourceAudioBuffer.numberOfChannels,
+                        sourceAudioBuffer.length,
+                        sourceAudioBuffer.sampleRate)
+                    // Copy the source data into the offline AudioBuffer
+                    for (var channel = 0; channel < sourceAudioBuffer.numberOfChannels; channel++) {
+                        audioBuffer.copyToChannel(sourceAudioBuffer.getChannelData(channel), channel)
+                    }
+                    // Play it from the beginning.
+                    var source = offlineCtx.createBufferSource()
+                    source.buffer = sourceAudioBuffer
+                    source.connect(offlineCtx.destination)
+                    source.start(0)
+
+                    offlineCtx.oncomplete = function(e) {
+                        // `resampled` contains an AudioBuffer resampled at 16000Hz.
+                        // use resampled.getChannelData(x) to get an Float32Array for channel x.
+                        var resampled = e.renderedBuffer;
+                        var leftFloat32Array = resampled.getChannelData(0);
+                        // Use this float32array to send the samples to the server or whatever.
+                        bufferResampled = concatTypedArray(bufferResampled, leftFloat32Array)
+                    }
+
+                    offlineCtx.startRendering();
+
+                    ////// END RESAMPLE
+
+                    // Dispatch audio frames, convert them to Int16 arrays and send them as packets to the server.
+                    while (bufferResampled.length >= frame_size) {
+                        frame = bufferResampled.slice(0, frame_size)
+
+                        // Convert float values to int16.
+                        var intAudio = new Int16Array(frame.length)
+                        for (var j = 0; j < frame.length; j++) {
+                            intAudio[j] = Math.round(frame[j] * (1<<15))
+                        }
+
+                        // Put the audio frame into a packet and send it.
+                        var p = new Packet(PacketTypeAudioFrame, intAudio.buffer, src_addr=0, dest_addr=server_id)
+                        sendPacket(p)
+                        bufferResampled = bufferResampled.slice(frame_size)
+                    }
                 }
+
+                audioInput.connect(recorder);
+                recorder.connect(audioContext.destination);
+
+            } catch(err) {
+                /* handle the error */
+                error("Error opening the media stream: " + err)
             }
 
-            audioInput.connect(recorder);
-            recorder.connect(audioContext.destination);
-
-        } catch(err) {
-            /* handle the error */
-            error("Error opening the media stream: " + err)
         }
 
+        // Start microphone task.
+        async function tx(p) {
+            return await conn.sendPacket(p)
+        }
+        run_microphone(tx)
     }
 
-    // Start microphone task.
-    async function tx(p) {
-        return await conn.sendPacket(p)
+    // GUI setup.
+    var default_server = await getConfig("default_server")
+    debug("default_server = " + default_server)
+
+    if (default_server === null) {
+        var default_websocket_port = 9998
+        default_server = document.location.hostname + ":" + default_websocket_port
     }
-    run_microphone(tx)
+
+    // Set server in GUI.
+    document.getElementById("server_name").value = default_server;
+
+    const btnConnect = document.getElementById('btn_connect');
+
+    btnConnect.addEventListener('click', async () => {
+        btnConnect.disabled = true
+        var host = document.getElementById("server_name").value
+        var websocket_url = 'ws://' + host + '/ws'
+        var room_name = document.getElementById("room_name").value
+        // Start the client program.
+        run(websocket_url, room_name,
+            () => {},
+            () => {btnConnect.disabled = false},
+            )
+    })
+
+    // Setup microphone-mute button.
+    const btnToggleMute = document.getElementById('btnToggleMute');
+
+    function setMuted(is_muted) {
+        muted = is_muted
+        if (muted) {
+            info("You are now muted.")
+            btnToggleMute.innerHTML = "Unmute"
+        } else {
+            info("You are now unmuted.")
+            btnToggleMute.innerHTML = "Mute"
+        }
+    }
+
+    setMuted(false)
+
+    btnToggleMute.addEventListener('click', async () => {
+        setMuted(!muted)
+    })
+
+    // Setup leave button.
+    const btnLeave = document.getElementById('btnLeave');
+    btnLeave.addEventListener('click', async () => {
+        info("Leave the call.")
+        // TODO
+        document.location.reload()
+    })
+
+    // Setup show-log button.
+    const btnShowLog = document.getElementById('btnShowLog');
+    const divLog = document.getElementById('divLog')
+
+    var showLog = false
+
+    function setShowLog(_showLog) {
+        showLog = _showLog
+        if (showLog) {
+            divLog.style.display = "block"
+            btnShowLog.innerHTML = "Hide Log"
+        } else {
+            divLog.style.display = "none"
+            btnShowLog.innerHTML = "Show Log"
+        }
+    }
+
+    setShowLog(false)
+
+    // Toggle the log.
+    btnShowLog.addEventListener('click', async () => {
+        setShowLog(!showLog)
+    })
 }
 
-// Start the client program.
-
-const btnConnect = document.getElementById('btn_connect');
-
-btnConnect.addEventListener('click', async () => {
-    btnConnect.setAttribute('disabled', true)
-    var host = document.getElementById("server_name").value
-    var websocket_url = 'ws://' + host + '/ws'
-    var room_name = document.getElementById("room_name").value
-    run(websocket_url, room_name);
-})
-
-// Setup microphone-mute button.
-const btnToggleMute = document.getElementById('btnToggleMute');
-
-function setMuted(is_muted) {
-    muted = is_muted
-    if (muted) {
-        info("You are now muted.")
-        btnToggleMute.innerHTML = "Unmute"
-    } else {
-        info("You are now unmuted.")
-        btnToggleMute.innerHTML = "Mute"
-    }
-}
-
-setMuted(false)
-
-btnToggleMute.addEventListener('click', async () => {
-    setMuted(!muted)
-})
-
-// Setup show-log button.
-const btnShowLog = document.getElementById('btnShowLog');
-const divLog = document.getElementById('divLog')
-
-var showLog = false
-
-function setShowLog(_showLog) {
-    showLog = _showLog
-    if (showLog) {
-        divLog.style.display = "block"
-        btnShowLog.innerHTML = "Hide Log"
-    } else {
-        divLog.style.display = "none"
-        btnShowLog.innerHTML = "Show Log"
-    }
-}
-
-setShowLog(false)
-
-// Toggle the log.
-btnShowLog.addEventListener('click', async () => {
-    setShowLog(!showLog)
-})
+// Run main.
+main()
