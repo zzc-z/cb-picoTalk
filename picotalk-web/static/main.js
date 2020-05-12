@@ -576,8 +576,7 @@ async function main() {
     debug("default_server = " + default_server)
 
     if (default_server === null) {
-        var default_websocket_port = 9998
-        default_server = document.location.hostname + ":" + default_websocket_port
+        default_server = document.location.hostname
     }
 
     // Set server in GUI.
@@ -588,7 +587,7 @@ async function main() {
     btnConnect.addEventListener('click', async () => {
         btnConnect.disabled = true
         var host = document.getElementById("server_name").value
-        var websocket_url = 'ws://' + host + '/ws'
+        var websocket_url = 'wss://' + host + '/ws'
         var room_name = document.getElementById("room_name").value
         // Start the client program.
         run(websocket_url, room_name,
