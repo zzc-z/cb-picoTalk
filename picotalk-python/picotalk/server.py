@@ -644,6 +644,7 @@ def main():
         except ImportError as e:
             logger.info("'uvloop' is not available.")
 
+    global debug_echo
     debug_echo = args.echo
 
     if debug_echo:

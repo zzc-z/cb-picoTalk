@@ -40,12 +40,12 @@ from .transports.base import Connection
 from .transports import udp as transport_udp, tcp as transport_tcp, websocket as transport_ws, \
     encrypted as transport_enc
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+logging.basicConfig(level=logging.DEBUG, stream=sys.stdout,
                     format='%(name)8s %(levelname)8s %(message)s')
 logger = logging.getLogger("Main")
 
 # PyAudio singleton.
-audio: Optional[pyaudio.PyAudio] = None
+audio: pyaudio.PyAudio = pyaudio.PyAudio()
 
 # Audio format to be used.
 audio_format = pyaudio.paInt16
@@ -603,9 +603,6 @@ def main():
         pipeline.append(Squelch(frame_size=common.frame_size, sample_rate=common.sample_rate))
 
     audio_processor = AudioProcessorPipeline(*pipeline)
-
-    # Initialize audio singleton.
-    audio = pyaudio.PyAudio()
 
     client = PTClient(password=password, user_name=args.user)
 
