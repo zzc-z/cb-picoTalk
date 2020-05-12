@@ -1,6 +1,11 @@
-# PicoTalk Python
+# PicoTalk
+
+PicoTalk aims to be a simple solution for group-calls. PicoTalk relies on a central server that is used for signalling and also routing and mixing of the audio signals. The goal is to provide true end-to-end encrypted group-calls such that the server does not have to be trusted. This is work-in-progress tough.
+
 *PicoTalk Python* is the main implementation of picoTalk.
 This includes a server and client program written in Python.
+
+*PicoTalk Web* is an alternative implementation of the client which can be run from a browser.
 
 ## Install on Debian
 
