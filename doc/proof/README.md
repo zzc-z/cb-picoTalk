@@ -6,7 +6,7 @@ This folder contains formal models of some cryptographic protocols used in picoT
 
 Non-standard protocols include:
 
-    * The password authenticated key-exchange.
-    * The secure channel built on top of NaCl `secretbox`.
-    * Triple-Diffie-Hellman (3DH) authenticated key-exchange (this is part of the Signal/Axolotl protocol though)
+* The password authenticated key-exchange.
+* The secure channel built on top of NaCl `secretbox`.
+* Triple-Diffie-Hellman (3DH) authenticated key-exchange (this is part of the Signal/Axolotl protocol though)
 
