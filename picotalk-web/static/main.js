@@ -571,6 +571,30 @@ async function main() {
         run_microphone(tx)
     }
 
+    var divJoinRoomForm = document.getElementById('joinRoomForm')
+    var divControlButtons = document.getElementById('controlButtons')
+    var divJoinRoomConfirm = document.getElementById('joinRoomConfirm')
+
+    // Get URL parameters.
+    // TODO: Inspect (from stackoverflow)
+    var url_parameters = window.location.search.slice(1)
+                      .split('&')
+                      .reduce(function _reduce (/*Object*/ a, /*String*/ b) {
+                        b = b.split('=');
+                        a[b[0]] = decodeURIComponent(b[1]);
+                        return a;
+                      }, {});
+    debug("URL parameters: " + JSON.stringify(url_parameters))
+
+    var is_joining_room = 'room' in url_parameters
+
+    if (is_joining_room) {
+        divJoinRoomForm.style.display = 'none'
+        divJoinRoomConfirm.style.display = 'flex'
+    } else {
+        divJoinRoomForm.style.display = 'flex'
+    }
+
     // GUI setup.
     var default_server = await getConfig("default_server")
     debug("default_server = " + default_server)
@@ -579,16 +603,32 @@ async function main() {
         default_server = document.location.hostname
     }
 
+    // Set room name.
+    var room_name_input = document.getElementById("room_name")
+    var random_room_name = hex(nacl.randomBytes(4))
+    // Set a random room name as default if none was supplied in the URL.
+    room_name_input.value = url_parameters['room'] || random_room_name
+
+    document.getElementById("joinRoomConfirmName").innerHTML = room_name.value
+    document.getElementById("joinRoomConfirmServer").innerHTML = "TODO"
+
     // Set server in GUI.
     document.getElementById("server_name").value = default_server;
 
     const btnConnect = document.getElementById('btn_connect');
 
     btnConnect.addEventListener('click', async () => {
-        btnConnect.disabled = true
+        window.location.search = 'room='+room_name.value
+    })
+
+    const btnJoin = document.getElementById('btn_join');
+    btnJoin.addEventListener('click', async () => {
+        btnJoin.disabled = true
+        divJoinRoomConfirm.style.display = "none"
+        divControlButtons.style.display = "flex"
         var host = document.getElementById("server_name").value
         var websocket_url = 'wss://' + host + '/ws'
-        var room_name = document.getElementById("room_name").value
+        var room_name = room_name_input.value
         // Start the client program.
         run(websocket_url, room_name,
             () => {},
@@ -621,7 +661,7 @@ async function main() {
     btnLeave.addEventListener('click', async () => {
         info("Leave the call.")
         // TODO
-        document.location.reload()
+        window.location.search = ''
     })
 
     // Setup show-log button.

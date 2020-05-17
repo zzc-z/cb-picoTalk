@@ -47,6 +47,12 @@ button:hover {
     border: 1px solid rgba(0, 0, 0, 0.1);
     border-radius: 10px;
     background-color: rgba(0, 0, 0, 0.2);
+    padding: 10px;
+
+    width: 25%;
+    min-width: 200px;
+    margin-bottom: 10px;
+
 }
 
 input {
@@ -74,19 +80,17 @@ input:hover {
     display: flex;
     align-items: center;
     flex-direction: column;
-    padding: 10px;
-    width: 25%;
-    min-width: 200px;
-    margin-bottom: 10px;
+}
+
+#joinRoomConfirm{
+    display: flex;
+    align-items: center;
+    flex-direction: column;
 }
 
 #controlButtons {
     display: flex;
     align-items: center;
-    padding: 10px;
-    width: 25%;
-    min-width: 200px;
-    margin-bottom: 10px;
 }
 
 #controlButtons button {

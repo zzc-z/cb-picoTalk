@@ -31,13 +31,24 @@
 
     <h1>picoTalk <img src="owl.svg" height="40px" style="margin-bottom: -5px"/></h1>
 
-    <div class="box" id="joinRoomForm">
-        <label>Room name</label><input type="text" id="room_name" value="DefaultRoom"> <br />
+    <noscript>
+        <b>JavaScript must be enabled for this site!</b>
+    </noscript>
+
+    <div class="box" id="joinRoomForm" style="display: none;">
+        <label>Room name</label><input type="text" id="room_name" value=""> <br />
         <label class="optional">Server</label><input type="text" class="optional" id="server_name" value=""> <br />
         <button id="btn_connect">Go</button>
     </div>
 
-    <div class="box" id="controlButtons">
+    <div class="box" id="joinRoomConfirm" style="display: none;">
+        Join the room <b id="joinRoomConfirmName">...</b> <br />
+        on server <b id="joinRoomConfirmServer">...</b> <br />
+        <button id="btn_join">Join</button>
+        <button id="btn_dont_join" onclick="window.location.search = ''">Don't Join</button>
+    </div>
+
+    <div class="box" id="controlButtons" style="display: none;">
         <button id="btnToggleMute">Mute</button>
         <button id="btnLeave">Leave</button>
     </div>
