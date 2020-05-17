@@ -34,10 +34,10 @@ function log(str) {
 }
 
 // Define logging functions.
-debug = (str) => {console.log("DEBUG: " + str)}
-info = (str) => {var str = "INFO: " + str; log(str);}
-warning = (str) => {str = "WARNING: " + str; log(str);}
-error = (str) => {str = "ERROR: " + str; log(str); alert(str)}
+debug = (str) => {console.debug("DEBUG: " + str)}
+info = (str) => {var str = "INFO: " + str; console.info(str); log(str);}
+warning = (str) => {str = "WARNING: " + str; console.warn(str); log(str);}
+error = (str) => {str = "ERROR: " + str; console.error(str); log(str); alert(str)}
 
 // Test if the NaCl library is loaded.
 if (typeof nacl === 'undefined') {
@@ -303,7 +303,6 @@ async function main() {
     async function loadConfig() {
         var response = await fetch("config.json")
         var json = await response.json()
-        console.log(json)
         return json
     }
 
@@ -344,7 +343,6 @@ async function main() {
         }
 
         sock.onerror = function (event) {
-            error(`WS Error: ${event.message}`)
             error("Cannot connect to " + websocket_url)
         }
 
@@ -430,7 +428,7 @@ async function main() {
             }
         }
 
-        var audio_queue = new Queue(maxsize=4)
+        var audio_queue = new Queue(maxsize=8)
         async function rx() {
             return await conn.receivePacket()
         }
@@ -483,17 +481,19 @@ async function main() {
             try {
                 debug("Try to open media stream.")
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
-                debug("Microphone stream sample rate: " + stream.sampleRate)
                 debug("Media stream opened: " + stream)
                 /* use the stream */
 
                 var audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:16000})
+                var mic_sample_rate = audioContext.sampleRate
+                debug("Microphone stream sample rate: " + mic_sample_rate)
 
                 var audioInput = audioContext.createMediaStreamSource(stream);
 
-                var recorder = audioContext.createScriptProcessor(1024, 1, 1);
+                var recorder = audioContext.createScriptProcessor(4096, 1, 1);
 
-                // Create empty buffer.
+                // Create empty buffers.
+                var bufferOriginal = new Float32Array(0)
                 var bufferResampled = new Float32Array(0)
 
                 recorder.onaudioprocess = function (e) {
@@ -503,39 +503,63 @@ async function main() {
 
                     ////// START RESAMPLE
                     // Resample the audio signal and fill it into the buffer.
-                    // From https://stackoverflow.com/questions/27598270/resample-audio-buffer-from-44100-to-16000
                     var sourceAudioBuffer = e.inputBuffer;  // directly received by the audioprocess event from the microphone in the browser
+                    var samples = sourceAudioBuffer.getChannelData(0)
+                    // Append frame to non-resampled buffer.
+                    bufferOriginal = concatTypedArray(bufferOriginal, samples)
 
-                    var TARGET_SAMPLE_RATE = sample_rate;
-                    var offlineCtx = new OfflineAudioContext(sourceAudioBuffer.numberOfChannels,
-                         sourceAudioBuffer.duration * sourceAudioBuffer.numberOfChannels * TARGET_SAMPLE_RATE,
-                         TARGET_SAMPLE_RATE
-                         )
-                    var audioBuffer = offlineCtx.createBuffer(sourceAudioBuffer.numberOfChannels,
-                        sourceAudioBuffer.length,
-                        sourceAudioBuffer.sampleRate)
-                    // Copy the source data into the offline AudioBuffer
-                    for (var channel = 0; channel < sourceAudioBuffer.numberOfChannels; channel++) {
-                        audioBuffer.copyToChannel(sourceAudioBuffer.getChannelData(channel), channel)
-                    }
-                    // Play it from the beginning.
-                    var source = offlineCtx.createBufferSource()
-                    source.buffer = sourceAudioBuffer
-                    source.connect(offlineCtx.destination)
-                    source.start(0)
+                    // Microphone sample rate is assumed to be a multiple of 100.
+                    // Also the target sample rate is assumed to be a multiple of 100.
+                    // Resampling is performed on a sliding window.
+                    var resample_frame_size = mic_sample_rate / 100
+                    // Resample frame by frame.
+                    while (bufferOriginal.length >= resample_frame_size*2) {
+                        // https://github.com/rochars/wave-resampler
+                        var samples = bufferOriginal.slice(0, resample_frame_size*2)
+                        // Resample!
+                        var newSamples = waveResampler.resample(samples, mic_sample_rate, sample_rate);
+                        newSamples = newSamples.slice(newSamples.length/4, newSamples.length/2 + newSamples.length/4)
 
-                    offlineCtx.oncomplete = function(e) {
-                        // `resampled` contains an AudioBuffer resampled at 16000Hz.
-                        // use resampled.getChannelData(x) to get an Float32Array for channel x.
-                        var resampled = e.renderedBuffer;
-                        var leftFloat32Array = resampled.getChannelData(0);
-                        // Use this float32array to send the samples to the server or whatever.
-                        bufferResampled = concatTypedArray(bufferResampled, leftFloat32Array)
+                        // Append the resampled frame to the buffer.
+                        bufferResampled = concatTypedArray(bufferResampled, newSamples)
+
+                        // Remove the processed frame from the buffer.
+                        bufferOriginal = bufferOriginal.slice(resample_frame_size)
                     }
 
-                    offlineCtx.startRendering();
+//                  From https://stackoverflow.com/questions/27598270/resample-audio-buffer-from-44100-to-16000
 
-                    ////// END RESAMPLE
+//
+//                    var TARGET_SAMPLE_RATE = sample_rate;
+//                    var offlineCtx = new OfflineAudioContext(sourceAudioBuffer.numberOfChannels,
+//                         sourceAudioBuffer.duration * sourceAudioBuffer.numberOfChannels * TARGET_SAMPLE_RATE,
+//                         TARGET_SAMPLE_RATE
+//                         )
+//                    var audioBuffer = offlineCtx.createBuffer(sourceAudioBuffer.numberOfChannels,
+//                        sourceAudioBuffer.length,
+//                        sourceAudioBuffer.sampleRate)
+//                    // Copy the source data into the offline AudioBuffer
+//                    for (var channel = 0; channel < sourceAudioBuffer.numberOfChannels; channel++) {
+//                        audioBuffer.copyToChannel(sourceAudioBuffer.getChannelData(channel), channel)
+//                    }
+//                    // Play it from the beginning.
+//                    var source = offlineCtx.createBufferSource()
+//                    source.buffer = sourceAudioBuffer
+//                    source.connect(offlineCtx.destination)
+//                    source.start(0)
+//
+//                    offlineCtx.oncomplete = function(e) {
+//                        // `resampled` contains an AudioBuffer resampled at 16000Hz.
+//                        // use resampled.getChannelData(x) to get an Float32Array for channel x.
+//                        var resampled = e.renderedBuffer;
+//                        var leftFloat32Array = resampled.getChannelData(0);
+//                        // Use this float32array to send the samples to the server or whatever.
+//                        bufferResampled = concatTypedArray(bufferResampled, leftFloat32Array)
+//                    }
+//
+//                    offlineCtx.startRendering();
+//
+//                    ////// END RESAMPLE
 
                     // Dispatch audio frames, convert them to Int16 arrays and send them as packets to the server.
                     while (bufferResampled.length >= frame_size) {
@@ -603,6 +627,9 @@ async function main() {
         default_server = document.location.hostname
     }
 
+    var server_name = url_parameters['server'] || default_server
+    debug("server_name = " + server_name)
+
     // Set room name.
     var room_name_input = document.getElementById("room_name")
     var random_room_name = hex(nacl.randomBytes(4))
@@ -610,15 +637,20 @@ async function main() {
     room_name_input.value = url_parameters['room'] || random_room_name
 
     document.getElementById("joinRoomConfirmName").innerHTML = room_name.value
-    document.getElementById("joinRoomConfirmServer").innerHTML = "TODO"
+    document.getElementById("joinRoomConfirmServer").innerHTML = server_name
 
     // Set server in GUI.
-    document.getElementById("server_name").value = default_server;
+    document.getElementById("server_name").value = server_name;
 
     const btnConnect = document.getElementById('btn_connect');
 
     btnConnect.addEventListener('click', async () => {
-        window.location.search = 'room='+room_name.value
+        var actual_server_name = document.getElementById("server_name").value
+        if (actual_server_name != default_server) {
+            window.location.search = 'room='+room_name.value+'&server='+actual_server_name
+        } else {
+            window.location.search = 'room='+room_name.value
+        }
     })
 
     const btnJoin = document.getElementById('btn_join');
