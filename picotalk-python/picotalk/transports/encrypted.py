@@ -207,10 +207,10 @@ async def authenticated_key_exchange(conn: Connection,
 
     if initiator_role:
         shared_secret = nacl.hash.sha512(box1.shared_key() + box2.shared_key() + box3.shared_key(),
-                                          encoder=nacl.encoding.RawEncoder)
+                                         encoder=nacl.encoding.RawEncoder)
     else:
         shared_secret = nacl.hash.sha512(box2.shared_key() + box1.shared_key() + box3.shared_key(),
-                                          encoder=nacl.encoding.RawEncoder)
+                                         encoder=nacl.encoding.RawEncoder)
 
     key = shared_secret[:32]
 
@@ -222,11 +222,9 @@ class SPEKE:
     SPEKE: Simple password exponential key exchange.
     """
 
-    def __init__(self, password: bytes, salt: bytes = b""):
-        p = nacl.hash.blake2b(password,
-                              digest_size=32,
-                              salt=b'speke' + salt,
-                              encoder=nacl.encoding.RawEncoder)
+    def __init__(self, password: bytes):
+        p = nacl.hash.sha512(password,
+                             encoder=nacl.encoding.RawEncoder)[:32]
         # Compute base point from the hashed password: P = pG
         self.generator = crypto_scalarmult_base(p)
         self.__private_key = None

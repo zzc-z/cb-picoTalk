@@ -39,6 +39,10 @@ info = (str) => {var str = "INFO: " + str; console.info(str); log(str);}
 warning = (str) => {str = "WARNING: " + str; console.warn(str); log(str);}
 error = (str) => {str = "ERROR: " + str; console.error(str); log(str); alert(str)}
 
+function assert(assertion, msg) {
+    console.assert(assertion, msg)
+}
+
 // Test if the NaCl library is loaded.
 if (typeof nacl === 'undefined') {
     error("NaCl library is not loaded.")
@@ -173,7 +177,8 @@ class SecureConnection {
         this.__counter = 1
         this.__counter_other = 1
 
-        // assert 0 <= nonce < 256
+        assert(0 <= nonce, "Nonce out of range.")
+        assert(nonce < 256, "Nonce out of range.")
         this.__nonce = nonce
 
         this.permit_dropped_packets = permit_dropped_packets
@@ -292,12 +297,186 @@ async function authenticatedKeyExchange(conn) {
     var shared3 = nacl.box.before(public_key_other, keyPairEphemeral.secretKey);
 
     shared_secret = hash(concatTypedArray(concatTypedArray(shared1, shared2), shared3))
-    debug("Shared secret: " + hex(shared_secret))
+    debug("Shared secret: " + hex(shared_secret.slice(0, 4)) + "...")
 
     return shared_secret
 }
 
+// SPEKE: Simple password exponential key exchange.
+class SPEKE {
+
+    constructor(password, salt = new Uint8Array(0)) {
+        var p = hash(password)
+
+        // Compute base point from the hashed password: P = pG
+        this.generator = nacl.scalarMult.base(p)
+        this.__private_key = null
+    }
+
+    //  Generate fresh key pair based on password.
+    //  This key pair can be used for at most one key exchange.
+    generate_public_key() {
+        this.__private_key = nacl.randomBytes(32)
+        var public_key = nacl.scalarMult(this.__private_key, this.generator)
+        return public_key
+    }
+
+    //  Compute a shared secret based on another public key.
+    //  This can be called only once after creating a new key pair.
+    compute_shared_key(other_public) {
+        if (this.__private_key === null) {
+            throw "Must call `generate_public_key() first."
+        }
+        var s = nacl.scalarMult(this.__private_key, other_public)
+        // Make sure this secret kehy is only used once.
+        this.__private_key = null // TODO: Wipe the key!
+
+        // Compute the hash of the shared secret.
+        var s_hashed = hash(s)
+
+        return s_hashed
+    }
+}
+
+//  Do a password authenticated key exchange to derive a shared secret key.
+//  :param conn: Underlying insecure connection.
+async function password_authenticated_key_exchange(conn, password) {
+    var speke = new SPEKE(password)
+
+    var public_key = speke.generate_public_key()
+
+    // Send key message.
+    debug("SPEKE: Send public key.")
+    var tx = conn.sendPacket(new Packet(PacketTypeBinary, public_key))
+
+    // Receive public key message.
+    debug("SPEKE: Receive public key.")
+    var rx = conn.receivePacket()
+
+    await tx
+    var msg = await rx
+
+    if (msg.type != PacketTypeBinary) {
+        throw "Wrong message type: " + msg.type
+    }
+    if (msg.length != 32) {
+        throw "Wrong public key length."
+    }
+
+    var public_key_other = msg.dataAsUint8()
+
+    var shared_secret = speke.compute_shared_key(public_key_other)
+
+    return shared_secret
+}
+
+//Data structure for another peer.
+class Peer {
+
+    constructor(peer_id, send_packet_fn, password, is_initiator) {
+        this.msg_queue_in = new Queue() // Queue for incoming messages from this peer.
+        this.peer_id = peer_id
+        this.password = password
+        this.peer_name = null
+
+        // Receive packet from peer.
+        var _msg_queue = this.msg_queue_in
+        async function rx() {
+            return await _msg_queue.get()
+        }
+
+        // Send packet to peer.
+        async function tx(p) {
+            p.dest_addr = peer_id // Set destination address.
+            await send_packet_fn(p)
+        }
+
+        // Connection via server (not E2EE).
+        this.conn_server = {
+            receivePacket: rx,
+            sendPacket: tx
+        }
+
+        this.conn_e2ee = this.run_key_exchange(password, is_initiator)
+        this.run() // TODO Also terminate this somewhen.
+    }
+
+//
+//    def close(self):
+//        """
+//        Close this peer connection.
+//        """
+//        pass
+
+    // Process incoming packets from other peers.
+    async run() {
+        var conn = await this.conn_e2ee
+        while (true) {
+            var p = await conn.receivePacket()
+            debug("Got E2EE packet from peer: " + p.dataAsString())
+
+            if (p.type == PacketTypeJSON) {
+                var d = p.toJson()
+                if ('user_name' in d) {
+                    this.peer_name = d.user_name
+                    info("User set her name: " + this.peer_name)
+                }
+                if ('chat_message' in d) {
+                   var msg = d.chat_message
+                   log("Chat message from " + this.peer_name + ": " + msg)
+                }
+            }
+        }
+    }
+
+    // Send a Packet to the peer over the end-to-end encrypted channel.
+    async send_to_peer(p) {
+        var conn = await this.conn_e2ee
+        await conn.sendPacket(p)
+    }
+
+    //  Run authenticated key exchange with other peer.
+    //  If the key exchange is successfull the 'this.conn_e2ee' future will be set.
+    async run_key_exchange(password, is_initiator) {
+        debug("Start key exchange with peer " + this.peer_id)
+        var shared_key = await password_authenticated_key_exchange(this.conn_server, password)
+        debug("E2EE Shared secret: " + hex(shared_key.slice(0, 4)) + "...")
+
+        var conn_e2ee = new SecureConnection(shared_key, this.conn_server, is_initiator, 0)
+
+        return conn_e2ee
+    }
+
+    async handle_packet_from_peer(p) {
+        debug("Handle packet from peer " + p.src_addr)
+        this.msg_queue_in.put_nowait(p)
+    }
+}
+
+// Setup GUI elements.
+var divPeerList = document.getElementById('peerList')
+
+// Display a peer on the GUI or change it's name.
+function add_peer(peer_id, name) {
+    var node = document.getElementById("peer_"+peer_id)
+    if (node === null) {
+        node = document.createElement("button")
+        node.id = "peer_"+peer_id
+        divPeerList.appendChild(node)
+    }
+    node.innerHTML = name
+}
+
+// Remove a displayed peer from the GUI.
+function remove_peer(peer_id) {
+    var node = document.getElementById("peer_"+peer_id)
+    if (node !== null) {
+        node.remove()
+    }
+}
+
 async function main() {
+
 
     // Load configuration from config.json.
     async function loadConfig() {
@@ -325,8 +504,15 @@ async function main() {
 
     async function run(websocket_url, room_name, onstart, onend) {
 
+        // Password for password authenticated key exchange.
+        var password = str2bytes("TODO")
+        var user_name = "Anonymous JS client"
+
+        // Other peers.
+        var peers = {}
+
         // Open the WebSocket.
-        queue_from_server = new Queue()
+        var queue_from_server = new Queue()
 
         info("Connecting to WebSocket: " + websocket_url)
         var sock = new WebSocket(websocket_url)
@@ -366,7 +552,6 @@ async function main() {
         async function receivePacket() {
             return parsePacket(await receiveBytes())
         }
-
 
         var conn_plain = {
             receivePacket: receivePacket,
@@ -410,6 +595,66 @@ async function main() {
         var p = Packet.createJson({use_udp: false})
         await conn.sendPacket(p)
 
+        async function handle_control_packet(p) {
+            info("Received a control packet: " + p.dataAsString())
+
+            if (p.src_addr == server_id) {
+                // Packet comes from server.
+                var json = p.toJson()
+
+                if ('event' in json) {
+                    var event = json.event
+                    debug("Event = " + event)
+
+                    if (event == 'peer_joined') {
+                        var peer_id = json.peer_id
+                        var name = `Anonymous (${peer_id})`
+                        add_peer(peer_id, name)
+
+                        // Create new peer object.
+                        if (peer_id in peers) {
+                            warn(`Peer with ID ${peer_id} is already registered.`)
+                        } else {
+                            // Start connection to peer.
+                            async function tx(p) {
+                                conn.sendPacket(p)
+                            }
+                            var peer = new Peer(peer_id, tx, password, true)
+                            peers[peer_id] = peer
+                            // Send my user name to the peer.
+                            peer.send_to_peer(Packet.createJson({user_name: user_name}))
+                        }
+                    } else if (event == 'peer_disconnected') {
+                        var peer_id = json.peer_id
+                        remove_peer(peer_id)
+                    }
+                }
+            } else {
+                // Packet comes from another peer.
+                var peer_id = p.src_addr
+                info("Packet from another peer: " + peer_id)
+
+                if (peer_id == 0) {
+                    warning("src_addr == 0, drop packet")
+                    return
+                }
+
+                if (!(peer_id in peers)) {
+                    // Create peer object if none exists.
+                    async function tx(p) {
+                        conn.sendPacket(p)
+                    }
+                    var peer = new Peer(peer_id, tx, password, false)
+                    peers[peer_id] = peer
+                    // Send my user name to the peer.
+                    peer.send_to_peer(Packet.createJson({user_name: user_name}))
+                }
+                var peer = peers[peer_id]
+                // Pass the packet to the peer object.
+                await peer.handle_packet_from_peer(p)
+            }
+        }
+
         async function receive_from_server(receivePacket, audio_queue) {
             debug("Start receiver task.")
             while (true) {
@@ -423,12 +668,12 @@ async function main() {
                     }
                     audio_queue.put_nowait(p)
                 } else {
-                    info("Received a control packet: " + p.dataAsString())
+                    await handle_control_packet(p)
                 }
             }
         }
 
-        var audio_queue = new Queue(maxsize=8)
+        var audio_queue = new Queue(maxsize=4)
         async function rx() {
             return await conn.receivePacket()
         }
@@ -527,40 +772,6 @@ async function main() {
                         bufferOriginal = bufferOriginal.slice(resample_frame_size)
                     }
 
-//                  From https://stackoverflow.com/questions/27598270/resample-audio-buffer-from-44100-to-16000
-
-//
-//                    var TARGET_SAMPLE_RATE = sample_rate;
-//                    var offlineCtx = new OfflineAudioContext(sourceAudioBuffer.numberOfChannels,
-//                         sourceAudioBuffer.duration * sourceAudioBuffer.numberOfChannels * TARGET_SAMPLE_RATE,
-//                         TARGET_SAMPLE_RATE
-//                         )
-//                    var audioBuffer = offlineCtx.createBuffer(sourceAudioBuffer.numberOfChannels,
-//                        sourceAudioBuffer.length,
-//                        sourceAudioBuffer.sampleRate)
-//                    // Copy the source data into the offline AudioBuffer
-//                    for (var channel = 0; channel < sourceAudioBuffer.numberOfChannels; channel++) {
-//                        audioBuffer.copyToChannel(sourceAudioBuffer.getChannelData(channel), channel)
-//                    }
-//                    // Play it from the beginning.
-//                    var source = offlineCtx.createBufferSource()
-//                    source.buffer = sourceAudioBuffer
-//                    source.connect(offlineCtx.destination)
-//                    source.start(0)
-//
-//                    offlineCtx.oncomplete = function(e) {
-//                        // `resampled` contains an AudioBuffer resampled at 16000Hz.
-//                        // use resampled.getChannelData(x) to get an Float32Array for channel x.
-//                        var resampled = e.renderedBuffer;
-//                        var leftFloat32Array = resampled.getChannelData(0);
-//                        // Use this float32array to send the samples to the server or whatever.
-//                        bufferResampled = concatTypedArray(bufferResampled, leftFloat32Array)
-//                    }
-//
-//                    offlineCtx.startRendering();
-//
-//                    ////// END RESAMPLE
-
                     // Dispatch audio frames, convert them to Int16 arrays and send them as packets to the server.
                     while (bufferResampled.length >= frame_size) {
                         frame = bufferResampled.slice(0, frame_size)
@@ -615,6 +826,7 @@ async function main() {
     if (is_joining_room) {
         divJoinRoomForm.style.display = 'none'
         divJoinRoomConfirm.style.display = 'flex'
+        divPeerList.style.display = 'flex'
     } else {
         divJoinRoomForm.style.display = 'flex'
     }

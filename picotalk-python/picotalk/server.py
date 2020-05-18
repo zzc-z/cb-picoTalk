@@ -464,13 +464,17 @@ class Client:
                 logger.info(f"Client UDP check init message: {msg}")
                 if msg.get('udp_check') == 'init':
                     # Acknowledge to client to use UDP.
-                    await udp_conn.write_packet(TLVPacket.from_dict(udp_check='ok'))
+                    p = TLVPacket.from_dict(udp_check='ok')
+                    p.src_addr = common.server_id
+                    await udp_conn.write_packet(p)
                 else:
                     # Message should contain udp_check='init'!
                     pass
             except asyncio.TimeoutError:
                 # Tell the client not to use UDP.
-                await self.conn.write_packet(TLVPacket.from_dict(udp_check='failed'))
+                p = TLVPacket.from_dict(udp_check='failed')
+                p.src_addr = common.server_id
+                await self.conn.write_packet(p)
 
             use_udp = False
             # Wait for client to decide whether to use UDP or not.
