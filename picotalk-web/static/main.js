@@ -425,6 +425,7 @@ class Peer {
                 if ('chat_message' in d) {
                    var msg = d.chat_message
                    log("Chat message from " + this.peer_name + ": " + msg)
+                   gui_display_chat_message(this.peer_name, msg)
                 }
             }
         }
@@ -456,6 +457,7 @@ class Peer {
 
 // Setup GUI elements.
 var divPeerList = document.getElementById('peerList')
+var inputChatMessage = document.getElementById('inputChatMessage')
 
 // Display a peer on the GUI or change it's name.
 function gui_add_peer(peer_id, name) {
@@ -474,6 +476,14 @@ function gui_remove_peer(peer_id) {
     if (node !== null) {
         node.remove()
     }
+}
+
+// Display a chat message.
+function gui_display_chat_message(sender_name, msg) {
+    var msglist = document.getElementById("chatMessages")
+    var node = document.createElement("li")
+    node.innerHTML = sender_name + ": " + msg
+    msglist.appendChild(node)
 }
 
 async function main() {
@@ -514,6 +524,21 @@ async function main() {
 
         // Other peers.
         var peers = {}
+
+        inputChatMessage.addEventListener("keyup", function(event) {
+            // When enter is pressed.
+            if (event.keyCode === 13) {
+                // Cancel the default action, if needed
+                event.preventDefault()
+                var msg = inputChatMessage.value
+                inputChatMessage.value = "" // Clear.
+                debug("Send chat message: " + msg)
+                gui_display_chat_message("Me", msg)
+                for (var peer_id in peers) {
+                    peers[peer_id].send_to_peer(Packet.createJson({chat_message: msg}))
+                }
+            }
+        })
 
         // Open the WebSocket.
         var queue_from_server = new Queue()
@@ -813,6 +838,7 @@ async function main() {
     var divJoinRoomForm = document.getElementById('joinRoomForm')
     var divControlButtons = document.getElementById('controlButtons')
     var divJoinRoomConfirm = document.getElementById('joinRoomConfirm')
+    var divChat = document.getElementById('divChat')
 
     var inputRoomName = document.getElementById("room_name")
     var inputPassword = document.getElementById("password")
@@ -877,6 +903,7 @@ async function main() {
         btnJoin.disabled = true
         divJoinRoomConfirm.style.display = "none"
         divControlButtons.style.display = "flex"
+        divChat.style.display = "flex"
         var host = document.getElementById("server_name").value
         var websocket_url = 'wss://' + host + '/ws'
         var room_name = inputRoomName.value

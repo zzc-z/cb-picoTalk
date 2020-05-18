@@ -111,6 +111,19 @@ input:hover {
     overflow-y: scroll;
 }
 
+#divChat {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+}
+
+#chatMessages {
+    width: 90%;
+    height: 200px;
+    overflow: hidden;
+    overflow-y: scroll;
+}
+
 #footer {
     border: 0px;
     background-color: rgba(0, 0, 0, 0);
