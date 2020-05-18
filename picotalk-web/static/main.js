@@ -420,6 +420,7 @@ class Peer {
                 if ('user_name' in d) {
                     this.peer_name = d.user_name
                     info("User set her name: " + this.peer_name)
+                    gui_add_peer(this.peer_id, this.peer_name)
                 }
                 if ('chat_message' in d) {
                    var msg = d.chat_message
@@ -457,18 +458,18 @@ class Peer {
 var divPeerList = document.getElementById('peerList')
 
 // Display a peer on the GUI or change it's name.
-function add_peer(peer_id, name) {
+function gui_add_peer(peer_id, name) {
     var node = document.getElementById("peer_"+peer_id)
     if (node === null) {
         node = document.createElement("button")
         node.id = "peer_"+peer_id
         divPeerList.appendChild(node)
     }
-    node.innerHTML = name
+    node.innerHTML = name + ` (${peer_id})`
 }
 
 // Remove a displayed peer from the GUI.
-function remove_peer(peer_id) {
+function gui_remove_peer(peer_id) {
     var node = document.getElementById("peer_"+peer_id)
     if (node !== null) {
         node.remove()
@@ -502,11 +503,14 @@ async function main() {
     // Tell if microphone is muted or not.
     var muted = false
 
-    async function run(websocket_url, room_name, onstart, onend) {
+    async function run(websocket_url, room_name, password, user_name, onstart, onend) {
+
+
+        info("Password: " + password)
+        info("User name: " + user_name)
 
         // Password for password authenticated key exchange.
-        var password = str2bytes("TODO")
-        var user_name = "Anonymous JS client"
+        var password = str2bytes(password)
 
         // Other peers.
         var peers = {}
@@ -609,7 +613,7 @@ async function main() {
                     if (event == 'peer_joined') {
                         var peer_id = json.peer_id
                         var name = `Anonymous (${peer_id})`
-                        add_peer(peer_id, name)
+                        gui_add_peer(peer_id, name)
 
                         // Create new peer object.
                         if (peer_id in peers) {
@@ -626,7 +630,7 @@ async function main() {
                         }
                     } else if (event == 'peer_disconnected') {
                         var peer_id = json.peer_id
-                        remove_peer(peer_id)
+                        gui_remove_peer(peer_id)
                     }
                 }
             } else {
@@ -810,6 +814,10 @@ async function main() {
     var divControlButtons = document.getElementById('controlButtons')
     var divJoinRoomConfirm = document.getElementById('joinRoomConfirm')
 
+    var inputRoomName = document.getElementById("room_name")
+    var inputPassword = document.getElementById("password")
+    var inputUserName = document.getElementById("user_name")
+
     // Get URL parameters.
     // TODO: Inspect (from stackoverflow)
     var url_parameters = window.location.search.slice(1)
@@ -843,10 +851,9 @@ async function main() {
     debug("server_name = " + server_name)
 
     // Set room name.
-    var room_name_input = document.getElementById("room_name")
     var random_room_name = hex(nacl.randomBytes(4))
     // Set a random room name as default if none was supplied in the URL.
-    room_name_input.value = url_parameters['room'] || random_room_name
+    inputRoomName.value = url_parameters['room'] || random_room_name
 
     document.getElementById("joinRoomConfirmName").innerHTML = room_name.value
     document.getElementById("joinRoomConfirmServer").innerHTML = server_name
@@ -872,9 +879,14 @@ async function main() {
         divControlButtons.style.display = "flex"
         var host = document.getElementById("server_name").value
         var websocket_url = 'wss://' + host + '/ws'
-        var room_name = room_name_input.value
+        var room_name = inputRoomName.value
+        var password = inputPassword.value
+        var user_name = inputUserName.value
         // Start the client program.
-        run(websocket_url, room_name,
+        run(websocket_url,
+            room_name,
+            password,
+            user_name,
             () => {},
             () => {btnConnect.disabled = false},
             )
