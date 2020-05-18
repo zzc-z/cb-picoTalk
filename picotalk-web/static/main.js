@@ -31,6 +31,9 @@ const server_id = 1
 function log(str) {
     const logElement = document.querySelector('#log');
     logElement.innerHTML += '<li>' + str + '</li>';
+
+    // Scroll to bottom.
+    logElement.scrollTop = logElement.scrollHeight;
 }
 
 // Define logging functions.
@@ -484,6 +487,8 @@ function gui_display_chat_message(sender_name, msg) {
     var node = document.createElement("li")
     node.innerHTML = sender_name + ": " + msg
     msglist.appendChild(node)
+    // Scroll to bottom.
+    msglist.scrollTop = msglist.scrollHeight;
 }
 
 async function main() {
