@@ -365,7 +365,7 @@ class Client:
 
         assert len(audio_tags) == 1, "Peer should attach exactly one tag."
         audio_tag = audio_tags[0]
-        assert audio_tag['peer_id'] == self.peer_id, "Peer should not lie about its own peer_id."
+        assert audio_tag['peer_id'] == self.peer_id, f"Peer should not lie about its own peer_id ({audio_tag['peer_id']})."
 
         await self.audio_queue_input.put((frame, audio_tag))
 

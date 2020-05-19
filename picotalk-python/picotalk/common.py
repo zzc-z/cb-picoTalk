@@ -39,7 +39,7 @@ sample_size = 2
 
 # Data type of audio meta tags.
 # This describes the data structures used for encryption appended to each audio frame.
-audio_tag_data_type = np.dtype([('peer_id', np.uint16), ('nonce', np.uint32)])
+audio_tag_data_type = np.dtype([('peer_id', np.uint16), ('nonce', np.uint32)]).newbyteorder('>')
 
 # Numpy data types.
 uint8_t = np.dtype(np.uint8).newbyteorder('>')

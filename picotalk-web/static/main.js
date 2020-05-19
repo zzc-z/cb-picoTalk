@@ -20,10 +20,11 @@
 
 
 
-const version = [0, 0, 18]
+const version = [0, 0, 19]
 
 const sample_rate = 16000 // Audio sample rate.
 const frame_size = 512 // Number of samples in an audio frame.
+const sample_size = 2 // Size of a sample in bytes.
 const server_id = 1
 
 
@@ -67,6 +68,17 @@ function hex(byteArray) {
   }).join('')
 }
 
+// Convert a hex-string into a Uint8Array.
+function parseHex(str) {
+    var result = [];
+    while (str.length >= 2) {
+        result.push(parseInt(str.substring(0, 2), 16));
+        str = str.substring(2, str.length);
+    }
+
+    return new Uint8Array(result);
+}
+
 // Convert a byte array to a string.
 function bytes2str(str) {
     var text_dec = new TextDecoder()
@@ -88,6 +100,49 @@ function uint8ArrayToBuffer(array) {
 // For now this is the first 256 bits of the SHA512 hash.
 function hash(bytes) {
     return nacl.hash(bytes).slice(0, 32)
+}
+
+// Generate a pseudo-random sequence of Int16 that can be used to encrypt
+// an audio frame by element-wise addition.
+// length = Number of Int16
+function generate_key_stream(key, peer_id, counter, length) {
+
+    // Create the nonce.
+    var nonce = new Uint8Array(24)
+    var d = new DataView(nonce.buffer)
+    d.setUint16(0, peer_id)
+    d.setUint32(2, counter)
+
+    // Construct key stream.
+    var zeros = new Uint8Array(length*2) // TODO: Explicitly fill with zeros?
+    var key_stream = nacl.secretbox(zeros, nonce, key) // Encrypt the zero bytes to gain the keystream.
+
+    // Cut away the authenticator.
+    key_stream = key_stream.slice(16)
+
+    // Convert to Int16Array.
+    var key_stream_buffer = uint8ArrayToBuffer(key_stream)
+    var key_signal = new Int16Array(key_stream_buffer)
+
+    return key_signal
+}
+
+function encrypt_audio_frame(frame, key, peer_id, counter) {
+    var key_signal = generate_key_stream(key, peer_id, counter, frame.length)
+    var encrypted = new Int16Array(frame.length)
+    for (var i = 0; i < frame.length; i++) {
+        encrypted[i] = frame[i] + key_signal[i]
+    }
+    return encrypted
+}
+
+function decrypt_audio_frame(frame, key, peer_id, counter) {
+    var key_signal = generate_key_stream(key, peer_id, counter, frame.length)
+    var decrypted = new Int16Array(frame.length)
+    for (var i = 0; i < frame.length; i++) {
+        decrypted[i] = frame[i] - key_signal[i]
+    }
+    return decrypted
 }
 
 // Constants for packet types.
@@ -165,6 +220,22 @@ function parsePacket(arraybuffer) {
     return p
 }
 
+// Parse a (peer_id, nonce) audio tag that is appended to the audio frame.
+function parseAudioTag(arraybuffer, offset) {
+    var v = new DataView(arraybuffer)
+    var peer_id = v.getUint16(offset + 0)
+    var nonce = v.getUint32(offset + 2)
+    return {peer_id: peer_id, nonce: nonce}
+}
+
+// Return a ArrayBuffer containing the serialized audio tag.
+function encodeAudioTag(peer_id, counter) {
+    var buf = new ArrayBuffer(6)
+    var d = new DataView(buf)
+    d.setUint16(0, peer_id)
+    d.setUint32(2, counter)
+    return buf
+}
 
 // Secure channel implementation on top of NaCl secretbox.
 class SecureConnection {
@@ -381,6 +452,7 @@ class Peer {
         this.peer_id = peer_id
         this.password = password
         this.peer_name = null
+        this.audio_encryption_key = null
 
         // Receive packet from peer.
         var _msg_queue = this.msg_queue_in
@@ -429,6 +501,13 @@ class Peer {
                    var msg = d.chat_message
                    log("Chat message from " + this.peer_name + ": " + msg)
                    gui_display_chat_message(this.peer_name, msg)
+                }
+                if ('audio_encryption_key' in d) {
+                    // Receive the audio encryption key from the peer.
+                    var hex_key = d.audio_encryption_key
+                    debug(`Got audio encryption key from ${this.peer_id}: ${hex_key.substring(0, 8)}`)
+                    var key = parseHex(hex_key)
+                    this.audio_encryption_key = key
                 }
             }
         }
@@ -530,6 +609,25 @@ async function main() {
         // Other peers.
         var peers = {}
 
+        // My own peer_id.
+        // Will be set later.
+        var my_peer_id = null
+
+        // Generate audio encryption key.
+        var my_audio_encryption_key = nacl.randomBytes(32)
+
+        function get_audio_encryption_key_of_peer(peer_id) {
+
+            if (peer_id == my_peer_id) {
+                return my_audio_encryption_key
+            }
+
+            if (peer_id in peers) {
+                return peers[peer_id].audio_encryption_key
+            }
+            return null
+        }
+
         inputChatMessage.addEventListener("keyup", function(event) {
             // When enter is pressed.
             if (event.keyCode === 13) {
@@ -622,8 +720,8 @@ async function main() {
         var p = await conn.receivePacket()
         var msg = p.toJson()
         debug("Server-accept message: " + JSON.stringify(msg))
-        var user_id = msg.user_id
-        info("User ID: " + user_id)
+        my_peer_id = msg.user_id
+        info("Peer ID: " + my_peer_id)
 
         // Tell server not to use UDP.
         var p = Packet.createJson({use_udp: false})
@@ -655,8 +753,11 @@ async function main() {
                             }
                             var peer = new Peer(peer_id, tx, password, true)
                             peers[peer_id] = peer
-                            // Send my user name to the peer.
-                            peer.send_to_peer(Packet.createJson({user_name: user_name}))
+                            // Send my user name and audio encryption key to the peer.
+                            peer.send_to_peer(Packet.createJson({
+                                    user_name: user_name,
+                                    audio_encryption_key: hex(my_audio_encryption_key)
+                                }))
                         }
                     } else if (event == 'peer_disconnected') {
                         var peer_id = json.peer_id
@@ -680,8 +781,11 @@ async function main() {
                     }
                     var peer = new Peer(peer_id, tx, password, false)
                     peers[peer_id] = peer
-                    // Send my user name to the peer.
-                    peer.send_to_peer(Packet.createJson({user_name: user_name}))
+                    // Send my user name and audio encryption key to the peer.
+                    peer.send_to_peer(Packet.createJson({
+                            user_name: user_name,
+                            audio_encryption_key: hex(my_audio_encryption_key)
+                        }))
                 }
                 var peer = peers[peer_id]
                 // Pass the packet to the peer object.
@@ -696,11 +800,35 @@ async function main() {
 
                 if (p.type == PacketTypeAudioFrame) {
     //                info("Received an audio frame.")
+
+                    var frame = new Int16Array(p.data.slice(0, frame_size*sample_size))
+                    var tag_buffer = p.data.slice(frame_size*sample_size)
+
+                    // Parse audio tags.
+                    var tags = []
+                    for (var i = 0; i < tag_buffer.byteLength; i+=6) {
+                        var tag = parseAudioTag(tag_buffer, i)
+                        tags.push(tag)
+                    }
+
+                    // Decrypt the frame.
+                    for (const tag of tags) {
+                        var peer_id = tag.peer_id
+                        var key = get_audio_encryption_key_of_peer(peer_id)
+                        if (key === null) {
+                            // Can't decrypt the frame because the key is not known.
+                            debug(`Encryption key not known for peer ${peer_id}.`)
+                            // TODO: fill frame with silence or lower-volume noise.
+                            break
+                        }
+                        frame = decrypt_audio_frame(frame, key, peer_id, tag.nonce)
+                    }
+
                     if (audio_queue.is_full()) {
                         // Drop the oldest packet.
                         audio_queue.get_nowait()
                     }
-                    audio_queue.put_nowait(p)
+                    audio_queue.put_nowait(frame)
                 } else {
                     await handle_control_packet(p)
                 }
@@ -727,9 +855,7 @@ async function main() {
                     output[i] = 0;
                 }
                 if (!audio_queue.is_empty()) {
-                    var packet = audio_queue.get_nowait()
-
-                    var audio = new Int16Array(packet.data)
+                    var audio = audio_queue.get_nowait()
                     for (var i = 0; i < bufferSize; i++) {
                         output[i] = audio[i] *1.0/ (1<<15);
                     }
@@ -775,6 +901,9 @@ async function main() {
                 var bufferOriginal = new Float32Array(0)
                 var bufferResampled = new Float32Array(0)
 
+                // Frame counter for generating the encryption nonce.
+                var encryption_counter = 1
+
                 recorder.onaudioprocess = function (e) {
                     if (muted) {
                         return
@@ -792,9 +921,9 @@ async function main() {
                     // Resampling is performed on a sliding window.
                     var resample_frame_size = mic_sample_rate / 100
                     // Resample frame by frame.
-                    while (bufferOriginal.length >= resample_frame_size*2) {
+                    while (bufferOriginal.length >= resample_frame_size*sample_size) {
                         // https://github.com/rochars/wave-resampler
-                        var samples = bufferOriginal.slice(0, resample_frame_size*2)
+                        var samples = bufferOriginal.slice(0, resample_frame_size*sample_size)
                         // Resample!
                         var newSamples = waveResampler.resample(samples, mic_sample_rate, sample_rate);
                         newSamples = newSamples.slice(newSamples.length/4, newSamples.length/2 + newSamples.length/4)
@@ -816,10 +945,24 @@ async function main() {
                             intAudio[j] = Math.round(frame[j] * (1<<15))
                         }
 
-                        // Put the audio frame into a packet and send it.
-                        var p = new Packet(PacketTypeAudioFrame, intAudio.buffer, src_addr=0, dest_addr=server_id)
-                        sendPacket(p)
-                        bufferResampled = bufferResampled.slice(frame_size)
+                        if (my_audio_encryption_key !== null) { // Don't send anything if the encryption key is not defined.
+
+                            // Encrypt the audio frame.
+                            var encryptedIntAudio = encrypt_audio_frame(intAudio, my_audio_encryption_key,
+                                my_peer_id, encryption_counter)
+                            var audio_tag = encodeAudioTag(my_peer_id, encryption_counter)
+                            encryption_counter += 1 // Make sure the counter is never used twice.
+
+                            // Append audio tag.
+                            var data = concatTypedArray(new Uint8Array(encryptedIntAudio.buffer),
+                                new Uint8Array(audio_tag)
+                            )
+
+                            // Put the audio frame into a packet and send it.
+                            var p = new Packet(PacketTypeAudioFrame, data.buffer, src_addr=0, dest_addr=server_id)
+                            sendPacket(p)
+                            bufferResampled = bufferResampled.slice(frame_size)
+                        }
                     }
                 }
 
