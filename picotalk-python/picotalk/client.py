@@ -61,6 +61,27 @@ thread_pool = ThreadPoolExecutor()
 # Struct used to create the nonce for the encryption of an audio frame.
 _nonce_struct = struct.Struct(">HI")
 
+def _runtime_check_nacl():
+    """
+    Verify that NaCl puts the 16-byte authenticator
+    in front of the cipher text.
+    This is required for the `generate_key_stream()` function.
+    :return:
+    """
+
+    key = b"\00"*32
+    nonce = b"\00"*24
+    # Generate two cipher text from slightly plaintext that differ only in a single bit.
+    # The same key and nonce are used for both.
+    # The authenticators of the ciphertexts should differ significantly, while the encrypted data should differ
+    # by only one bit.
+    c1 = nacl.bindings.crypto_secretbox(b"\00"*17, nonce, key)
+    c2 = nacl.bindings.crypto_secretbox(b"\01"+b"\00"*16, nonce, key)
+
+    # Check that the part where plaintext is the same also matches for the cipher texts.
+    assert c1[16+1:] == c2[16+1:], "NaCl crypto_secretbox() does not behave as required."
+
+_runtime_check_nacl()
 
 def generate_key_stream(key: bytes,
                         peer_id: int,
@@ -92,7 +113,7 @@ def generate_key_stream(key: bytes,
 
     assert len(key_stream) == len(zeros) + nacl.secret.SecretBox.MACBYTES
     # Cut away the MAC.
-    key_stream = key_stream[:-nacl.secret.SecretBox.MACBYTES]  # TODO: Is MAC appended or prepended?
+    key_stream = key_stream[nacl.secret.SecretBox.MACBYTES:]  # TODO: 16 byte Authenticator is prepended.
 
     # Convert the key stream into integers of the same bit length as the audio samples.
     key_signal = np.frombuffer(key_stream, dtype=common.sample_data_type)
