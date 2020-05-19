@@ -52,7 +52,7 @@ button:hover {
     width: 25%;
     min-width: 300px;
     margin-bottom: 10px;
-
+    word-wrap: break-word;
 }
 
 input {
@@ -130,6 +130,9 @@ input:hover {
 }
 
 #chatMessages li {
+    border-radius: 5px;
+    padding: 5px;
+    margin-bottom: 5px;
     background: rgba(0, 0, 0, 0.1);
 }
 

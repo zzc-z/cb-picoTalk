@@ -56,6 +56,7 @@ thread_pool = ThreadPoolExecutor()
 
 
 async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
+                  peer_id: int,
                   _audio_processor: Optional[AudioProcessor] = None):
     """
     Read audio data and send it to the server.
@@ -99,9 +100,11 @@ async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
                 assert isinstance(frame, np.ndarray), f'Frame must be a np.ndarray not {type(frame)}.'
                 # Check if datatype is correct.
                 assert frame.dtype == common.sample_data_type, f"Wrong dtype: {frame.dtype}."
-
+                nonce = 0  # TODO
+                tag = np.array([(peer_id, nonce)], dtype=common.audio_tag_data_type)
                 # Send the packet if in transmission mode.
-                packet = TLVPacket(PacketType.AudioFrame, frame.tobytes(),
+                data = frame.tobytes() + tag.tobytes()
+                packet = TLVPacket(PacketType.AudioFrame, data,
                                    dest_addr=1  # This is directed to the server (1).
                                    )
                 # Write this frame to the server.
@@ -139,8 +142,6 @@ async def run_speaker(audio_buffer: asyncio.Queue):
         target_latency = 4
 
         while True:
-
-            # print("{}, {:.2f}, {:.2f}".format(audio_buffer.qsize(), estimated_latency, target_latency))
 
             while audio_buffer.full():
                 # If the buffer is full, then potentially
@@ -384,8 +385,13 @@ class PTClient:
                 if packet.type == PacketType.AudioFrame:
                     # Put audio packets into the audio buffer.
                     data = packet.data
+                    audio_data = data[:common.frame_size * common.sample_size]
+                    tag_data = data[common.frame_size * common.sample_size:]
+
                     # Convert frame to a numpy array.
-                    frame = np.frombuffer(data, dtype=common.sample_data_type).astype(np.int)
+                    frame = np.frombuffer(audio_data, dtype=common.sample_data_type).astype(np.int)
+                    audio_tags = np.frombuffer(tag_data, dtype=common.audio_tag_data_type)
+                    print(audio_tags)
 
                     if audio_buffer.full():
                         # Drop oldest frame if the buffer is full.
@@ -401,6 +407,7 @@ class PTClient:
                 return
             except Exception as e:
                 logger.debug("Exception: {}: {}".format(type(e), e))
+                await asyncio.sleep(1)  # Avoid spinning loop on an exception.
 
     async def run(self,
                   server_addr: str, server_port: int,
@@ -518,10 +525,14 @@ class PTClient:
             udp_conn.close()
 
         # Launch tasks for server communication and audio.
+
         if use_udp:
-            task_mic = asyncio.create_task(run_mic(udp_conn.write_packet, _audio_processor=audio_processor))
+            write_packet_mic = udp_conn.write_packet
         else:
-            task_mic = asyncio.create_task(run_mic(conn_encrypted.write_packet, _audio_processor=audio_processor))
+            write_packet_mic = conn_encrypted.write_packet
+        task_mic = asyncio.create_task(run_mic(write_packet_mic,
+                                               peer_id=user_id,
+                                               _audio_processor=audio_processor))
 
         task_tcp_receiver = asyncio.create_task(self.receive_from_server(conn_encrypted.read_packet, audio_buffer))
 

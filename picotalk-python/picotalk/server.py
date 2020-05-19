@@ -30,7 +30,8 @@ from nacl.public import PublicKey, PrivateKey, Box
 from . import common
 from .transports.packet import TLVPacket, PacketType
 from .transports.base import Connection
-from .transports import udp as transport_udp, tcp as transport_tcp, websocket as transport_ws, encrypted as transport_enc
+from .transports import udp as transport_udp, tcp as transport_tcp, websocket as transport_ws, \
+    encrypted as transport_enc
 
 logger_format = '%(asctime)-15s %(name)s %(levelname)s %(message)s'
 
@@ -214,7 +215,7 @@ class Room:
             next_chunk_time += chunk_duration
 
             # Read all available chunks.
-            current_chunks = dict()
+            current_frames_and_tags = dict()
             for peer in self.peers.values():
                 q = peer.audio_queue_input
 
@@ -224,32 +225,36 @@ class Room:
                     q.get_nowait()
 
                 if q.qsize() > 0:
-                    chunk: np.ndarray = q.get_nowait()
-                    if chunk.shape == (common.frame_size,):
-                        current_chunks[peer] = chunk
+                    frame, tag = q.get_nowait()
+                    assert isinstance(frame, np.ndarray)
+                    assert isinstance(tags, np.ndarray)
+                    if frame.shape == (common.frame_size,):
+                        current_frames_and_tags[peer] = frame, tag
                     else:
-                        logger.debug(f"Skip chunk of size {chunk.shape}")
+                        logger.debug(f"Skip frame of size {frame.shape}")
 
             # Compute output chunks for each peer.
             # And send the chunk to the peer.
             for peer_out in self.peers.values():
 
                 # Sum all chunks that don't come from the destination.
-                output_chunk = sum((c for p, c in current_chunks.items() if p != peer_out),
-                                   silence
-                                   )
+                tags = []
+                output_frame = silence.copy()
 
-                if debug_echo:
-                    # Send back the audio of this peer to herself.
-                    if peer_out in current_chunks:
-                        output_chunk = output_chunk + current_chunks[peer_out]
+                for peer, (frame, tag) in current_frames_and_tags.items():
+                    if peer != peer_out or debug_echo:  # Send back the audio of this peer to herself if debug_echo is set.
+                        output_frame += frame
+                        tags.append(tag)  # Remember who are the senders and which nonces did they use.
+
+                # Convert to a numpy array.
+                tags = np.array(tags)
 
                 out = peer_out.audio_queue_output
                 if out.full():
                     # Drop oldest chunk if the queue is full.
                     logger.debug('Output queue is full. Dropping oldest packet.')
                     out.get_nowait()
-                out.put_nowait(output_chunk)
+                out.put_nowait((output_frame, tags))
 
         logger.debug("Mixer task ended.")
 
@@ -350,10 +355,19 @@ class Client:
         The audio frame is forwarded to the audio mixer of the room via a queue.
         """
         # Handle an audio frame packet.
+
         data = p.data
-        # Convert bytes into numpy array.
-        chunk = np.frombuffer(data, dtype=common.sample_data_type)
-        await self.audio_queue_input.put(chunk)
+        audio_data = data[:common.frame_size * common.sample_size]
+        tag_data = data[common.frame_size * common.sample_size:]
+        # Convert frame to a numpy array.
+        frame = np.frombuffer(audio_data, dtype=common.sample_data_type).astype(np.int)
+        audio_tags = np.frombuffer(tag_data, dtype=common.audio_tag_data_type)
+
+        assert len(audio_tags) == 1, "Peer should attach exactly one tag."
+        audio_tag = audio_tags[0]
+        assert audio_tag['peer_id'] == self.peer_id, "Peer should not lie about its own peer_id."
+
+        await self.audio_queue_input.put((frame, audio_tag))
 
     async def run_connection(self):
         logger.debug("Start client connection protocol.")
@@ -383,12 +397,12 @@ class Client:
 
             # Create a UDP connection.
             udp_conn = transport_udp.UdpConnection(self.udp_router, stream_id=udp_stream_id,
-                                                    dest_addr=None)
+                                                   dest_addr=None)
             # Create encrypted UDP connection which allows packets to be lost
             # but enforces packets to remain ordered.
             udp_conn = transport_enc.SecureConnection(box, udp_conn,
-                                                             is_initiator=False, nonce=2,
-                                                             permit_dropped_packets=True)
+                                                      is_initiator=False, nonce=2,
+                                                      permit_dropped_packets=True)
 
             # Send accept-message to the client.
             await self.conn.write_packet(
@@ -427,6 +441,8 @@ class Client:
                 except asyncio.IncompleteReadError as e:
                     logger.info(f"Incomplete read error: {e}")
                     logger.info(f"Connection closed: {self.addr}")
+                except AssertionError as e:
+                    logger.error(e)
                 except Exception as e:
                     logger.info("Receiver task ended: {}".format(type(e)))
                 finally:
@@ -441,9 +457,10 @@ class Client:
                 """
                 try:
                     while not client_shutdown.is_set():
-                        chunk = await audio_queue.get()
-                        assert isinstance(chunk, np.ndarray)
-                        data = chunk.tobytes()
+                        frame, tags = await audio_queue.get()
+                        assert isinstance(frame, np.ndarray)
+                        assert isinstance(tags, np.ndarray)
+                        data = frame.tobytes() + tags.tobytes()
                         packet = TLVPacket(PacketType.AudioFrame, data)
                         await send_packet(packet)
                 except ConnectionError as e:
@@ -585,7 +602,7 @@ async def run_websocket_server(server_addr: str, server_port: int, udp_router: t
     )
 
 
-async def print_stats(interval: int = 10):
+async def print_stats(interval: int = 60):
     """
     Print server usage statistics in regular intervals.
     """
@@ -602,7 +619,7 @@ async def print_stats(interval: int = 10):
 
 async def run_server(server_addr: str, server_tcp_port: int, server_udp_port: int, server_websocket_port: int):
     # Start statistic logger tasks.
-    asyncio.create_task(print_stats(10))
+    asyncio.create_task(print_stats(60))
     # Open UDP transport.
     udp_router = await transport_udp.run_udp_server(None, server_addr, server_udp_port)
     # udp_packet_router.transport = udp_transport
