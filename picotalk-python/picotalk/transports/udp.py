@@ -33,8 +33,7 @@ class UdpPacketRouter:
     Routes incoming UDP packets based on their 'stream ID' tag.
     """
 
-    __stream_id_fmt = ">L"
-    __stream_id_length = struct.calcsize(__stream_id_fmt)
+    _stream_id_struct = struct.Struct(">L")
 
     def __init__(self):
         self.streams: Dict[int, Callable[[bytes, Any], None]] = dict()
@@ -60,7 +59,7 @@ class UdpPacketRouter:
     def send_datagram(self, stream_id: int, data: bytes, dest_addr):
         if self.transport is not None:
 
-            stream_id_tag = struct.pack(">L", stream_id)
+            stream_id_tag = UdpPacketRouter._stream_id_struct.pack(stream_id)
             data = stream_id_tag + data
             self.transport.sendto(data, dest_addr)
         else:
@@ -68,12 +67,12 @@ class UdpPacketRouter:
 
     def route_datagram(self, data: bytes, source_addr):
         # logger.debug(f"Routing UDP packet from {source_addr}")
-        tag_len = UdpPacketRouter.__stream_id_length
+        tag_len = UdpPacketRouter._stream_id_struct.size
         if len(data) < tag_len:
             logger.debug("Dropping packet: too short")
         else:
             # Decode the stream ID.
-            stream_id, = struct.unpack_from(UdpPacketRouter.__stream_id_fmt, data)
+            stream_id, = UdpPacketRouter._stream_id_struct.unpack_from(data)
 
             callback = self.streams.get(stream_id)
             if callback is None:
@@ -86,8 +85,8 @@ class UdpPacketRouter:
         """
         Generate a fresh stream ID for routing the UDP packets.
         """
-        random_bytes = nacl.utils.random(UdpPacketRouter.__stream_id_length)
-        udp_stream_id, = struct.unpack(UdpPacketRouter.__stream_id_fmt, random_bytes)
+        random_bytes = nacl.utils.random(UdpPacketRouter._stream_id_struct.size)
+        udp_stream_id, = UdpPacketRouter._stream_id_struct.unpack(random_bytes)
         return udp_stream_id
 
 

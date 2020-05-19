@@ -38,8 +38,7 @@ class TLVPacket:
     # Tag format for `struct.pack`.
     # Type: 1 byte, length: 2 bytes unsigned integer
     # Big endian.
-    __tag_format = '>BHHH'
-    __tag_length = struct.calcsize(__tag_format)
+    _tag_struct = struct.Struct('>BHHH')
 
     def __init__(self, _type: PacketType, data: bytes,
                  src_addr: int = 0, dest_addr: int = 0):
@@ -72,7 +71,7 @@ class TLVPacket:
         # Type: 1 byte
         # Length: uint16
         # Data: n bytes
-        tag = struct.pack(TLVPacket.__tag_format,
+        tag = TLVPacket._tag_struct.pack(
                           self.type.value, len(self.data),
                           self.src_addr, self.dest_addr
                           )
@@ -83,8 +82,8 @@ class TLVPacket:
         """
         Raises a `ValueError` if the type field is invalid.
         """
-        assert len(tag_data) >= TLVPacket.__tag_length
-        type_num, length, src_addr, dest_addr = struct.unpack(TLVPacket.__tag_format, tag_data)
+        assert len(tag_data) >= TLVPacket._tag_struct.size
+        type_num, length, src_addr, dest_addr = TLVPacket._tag_struct.unpack(tag_data)
 
         type = PacketType(type_num)
 
@@ -95,7 +94,7 @@ class TLVPacket:
         """
         Read packet from a asyncio.StreamReader
         """
-        tag_data = await reader.readexactly(TLVPacket.__tag_length)
+        tag_data = await reader.readexactly(TLVPacket._tag_struct.size)
         type, length, src_addr, dest_addr = TLVPacket.decode_tag(tag_data)
         data = await reader.readexactly(length)
 
@@ -107,7 +106,7 @@ class TLVPacket:
         Read packet from a `bytes` object.
         """
         assert isinstance(buffer, bytes), f"{type(buffer)}"
-        l = TLVPacket.__tag_length
+        l = TLVPacket._tag_struct.size
         type, length, src_addr, dest_addr = TLVPacket.decode_tag(buffer[:l])
         assert len(buffer) == l + length, "Buffer size does not match."
 

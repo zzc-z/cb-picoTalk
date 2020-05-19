@@ -46,6 +46,10 @@ class SecureConnection(Connection):
     No replay attack possible.
     """
 
+    # Used to create the nonce from connection_id, role and counter.
+    _nonce_struct = struct.Struct(">BBQ")
+    _counter_struct = struct.Struct(">Q")
+
     def __init__(self, box: Union[nacl.public.Box, nacl.secret.SecretBox],
                  conn: Connection,
                  is_initiator: bool,
@@ -77,7 +81,7 @@ class SecureConnection(Connection):
 
     @staticmethod
     def __create_nonce(connection_id: int, role: int, counter: int) -> bytes:
-        nonce_bytes = struct.pack(">BBQ", connection_id, role, counter)
+        nonce_bytes = SecureConnection._nonce_struct.pack(connection_id, role, counter)
         # random_bytes = nacl.utils.random(24 - 2 - 8)
         nonce_bytes = nonce_bytes + b"\00" * 14
         assert len(nonce_bytes) == 24
@@ -86,7 +90,7 @@ class SecureConnection(Connection):
     @staticmethod
     def __parse_nonce(nonce: bytes) -> Tuple[int, int, int]:
         assert len(nonce) == 24
-        connection_id, role, counter = struct.unpack_from(">BBQ", nonce)
+        connection_id, role, counter = SecureConnection._nonce_struct.unpack_from(nonce)
         return connection_id, role, counter
 
     async def read_packet(self) -> TLVPacket:
@@ -104,7 +108,7 @@ class SecureConnection(Connection):
                 if self.permit_dropped_packets:
                     # Strip away the counter.
                     counter_bytes, data = data[:8], data[8:]
-                    counter_received, = struct.unpack(">Q", counter_bytes)
+                    counter_received, = SecureConnection._counter_struct.unpack(counter_bytes)
                     # Make sure the counter is monotonic.
                     counter = max(counter_received, self.__counter_other)
 
@@ -135,7 +139,7 @@ class SecureConnection(Connection):
 
         if self.permit_dropped_packets:
             # Prepend the counter.
-            counter_bytes = struct.pack(">Q", self.__counter)
+            counter_bytes = SecureConnection._counter_struct.pack(self.__counter)
             assert len(counter_bytes) == 8
             data_encrypted = counter_bytes + data_encrypted
 

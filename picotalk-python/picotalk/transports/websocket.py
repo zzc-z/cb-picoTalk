@@ -17,11 +17,9 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
-import asyncio
+
 import logging
-import struct
 from typing import Any, Callable, Coroutine, Dict, Optional
-import nacl.utils
 from .packet import TLVPacket
 from .base import Connection
 
