@@ -23,12 +23,15 @@ import pyaudio
 import numpy as np
 import scipy.signal
 import sys
+import struct
 import argparse
 import logging
+import itertools
 
 from typing import Callable, Coroutine, Dict, Optional
 import nacl.hash
 import nacl.secret
+import nacl.bindings
 
 from . import common
 from .audio.audio_processor import AudioProcessor, AudioProcessorPipeline
@@ -54,6 +57,53 @@ audio_format = pyaudio.paInt16
 # such as reading from the microphone and writing to the speakers and reading from stdin.
 thread_pool = ThreadPoolExecutor()
 
+# Struct used to create the nonce for the encryption of an audio frame.
+_nonce_struct = struct.Struct(">HI")
+
+
+def encrypt_audio_frame(frame: np.ndarray, key: bytes,
+                        peer_id: int,
+                        counter: int,
+                        decrypt: bool = False) -> np.ndarray:
+    """
+    Encrypt an audio frame by adding pseudo-random white noise
+    generated from the key, peer_id and counter.
+    A combination of key, peer_id, counter should not be used more than
+    once for encryption.
+    :param frame:
+    :param key:
+    :param peer_id:
+    :param counter:
+    :return: The encrypted signal as a np.ndarray.
+    """
+    assert 0 <= peer_id <= 2 ** 16
+    assert 0 <= counter <= 2 ** 32
+
+    assert len(key) == 32, "Key must be exactly 32 bytes."
+
+    # Construct nonce.
+    nonce = _nonce_struct.pack(peer_id, counter) + b"\00" * 18
+    assert len(nonce) == 24, "Key must be exactly 24 bytes."
+
+    # Construct key stream.
+    zeros = b"\x00" * (len(frame) * common.sample_size)
+    key_stream = nacl.bindings.crypto_secretbox(zeros, nonce, key)
+
+    assert len(key_stream) == len(zeros) + nacl.secret.SecretBox.MACBYTES
+    # Cut away the MAC.
+    key_stream = key_stream[:-nacl.secret.SecretBox.MACBYTES] # TODO: Is MAC appended or prepended?
+
+    # Convert the key stream into integers of the same bit length as the audio samples.
+    key_signal = np.frombuffer(key_stream, dtype=common.sample_data_type)
+    assert key_signal.dtype == frame.dtype, "Frame has wrong data type."
+    assert key_signal.shape == frame.shape, "Key stream has wrong length."
+
+    # Add the key stream to the signal.
+    if decrypt:
+        return frame - key_signal
+    else:
+        return frame + key_signal
+
 
 async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
                   peer_id: int,
@@ -71,6 +121,8 @@ async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
 
     try:
         logger.debug('Start recording and sending audio.')
+
+        nonce_counter = itertools.count(1)
 
         while True:
             await asyncio.sleep(0)
@@ -100,10 +152,16 @@ async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
                 assert isinstance(frame, np.ndarray), f'Frame must be a np.ndarray not {type(frame)}.'
                 # Check if datatype is correct.
                 assert frame.dtype == common.sample_data_type, f"Wrong dtype: {frame.dtype}."
-                nonce = 0  # TODO
+
+                nonce = next(nonce_counter)
+
+                key = b"\00"*32 # TODO
+                frame_encrypted = encrypt_audio_frame(frame, key, peer_id, nonce)
+                frame_bytes = frame_encrypted.tobytes()
+
                 tag = np.array([(peer_id, nonce)], dtype=common.audio_tag_data_type)
                 # Send the packet if in transmission mode.
-                data = frame.tobytes() + tag.tobytes()
+                data = frame_bytes + tag.tobytes()
                 packet = TLVPacket(PacketType.AudioFrame, data,
                                    dest_addr=1  # This is directed to the server (1).
                                    )
@@ -113,6 +171,7 @@ async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
         pass
     except Exception as e:
         logger.error("Microphone task interrupted: {}".format(type(e)))
+        print(e)
 
     logger.debug('Microphone task ended.')
 
@@ -389,9 +448,16 @@ class PTClient:
                     tag_data = data[common.frame_size * common.sample_size:]
 
                     # Convert frame to a numpy array.
-                    frame = np.frombuffer(audio_data, dtype=common.sample_data_type).astype(np.int)
+                    frame = np.frombuffer(audio_data, dtype=common.sample_data_type)
                     audio_tags = np.frombuffer(tag_data, dtype=common.audio_tag_data_type)
                     print(audio_tags)
+
+                    key = b"\00"*32 # TODO
+                    for peer_id, nonce in audio_tags:
+                        frame = encrypt_audio_frame(frame, key, peer_id, nonce, decrypt=True)
+
+                    # Convert to 32 bit integer for signal processing.
+                    frame = frame.astype(np.int)
 
                     if audio_buffer.full():
                         # Drop oldest frame if the buffer is full.
