@@ -32,6 +32,7 @@ from typing import Callable, Coroutine, Dict, Optional
 import nacl.hash
 import nacl.secret
 import nacl.bindings
+import nacl.utils
 
 from . import common
 from .audio.audio_processor import AudioProcessor, AudioProcessorPipeline
@@ -61,20 +62,20 @@ thread_pool = ThreadPoolExecutor()
 _nonce_struct = struct.Struct(">HI")
 
 
-def encrypt_audio_frame(frame: np.ndarray, key: bytes,
+def generate_key_stream(key: bytes,
                         peer_id: int,
                         counter: int,
-                        decrypt: bool = False) -> np.ndarray:
+                        length: int) -> np.ndarray:
     """
-    Encrypt an audio frame by adding pseudo-random white noise
-    generated from the key, peer_id and counter.
-    A combination of key, peer_id, counter should not be used more than
-    once for encryption.
-    :param frame:
-    :param key:
-    :param peer_id:
-    :param counter:
-    :return: The encrypted signal as a np.ndarray.
+    Generate a pseudo random key signal that will be used to encrypt the audio signal.
+    Returns an ndarray with uniformly random 16-bit integers.
+    A combination of key, peer_id, counter shall be used only once. Otherwise encryption is
+    not secure anymore.
+    :param key: Encryption key.
+    :param peer_id: ID of the sender.
+    :param counter: Frame counter, this is used as a nonce.
+    :param length: Length of the ndarray.
+    :return:
     """
     assert 0 <= peer_id <= 2 ** 16
     assert 0 <= counter <= 2 ** 32
@@ -86,94 +87,62 @@ def encrypt_audio_frame(frame: np.ndarray, key: bytes,
     assert len(nonce) == 24, "Key must be exactly 24 bytes."
 
     # Construct key stream.
-    zeros = b"\x00" * (len(frame) * common.sample_size)
+    zeros = b"\x00" * (length * common.sample_size)
     key_stream = nacl.bindings.crypto_secretbox(zeros, nonce, key)
 
     assert len(key_stream) == len(zeros) + nacl.secret.SecretBox.MACBYTES
     # Cut away the MAC.
-    key_stream = key_stream[:-nacl.secret.SecretBox.MACBYTES] # TODO: Is MAC appended or prepended?
+    key_stream = key_stream[:-nacl.secret.SecretBox.MACBYTES]  # TODO: Is MAC appended or prepended?
 
     # Convert the key stream into integers of the same bit length as the audio samples.
     key_signal = np.frombuffer(key_stream, dtype=common.sample_data_type)
-    assert key_signal.dtype == frame.dtype, "Frame has wrong data type."
-    assert key_signal.shape == frame.shape, "Key stream has wrong length."
+    assert key_signal.dtype == common.sample_data_type, "Frame has wrong data type."
+    assert len(key_signal) == length, "Key stream has wrong length."
+
+    return key_signal
+
+
+def encrypt_audio_frame(frame: np.ndarray, key: bytes,
+                        peer_id: int,
+                        counter: int) -> np.ndarray:
+    """
+    Encrypt an audio frame by adding pseudo-random white noise
+    generated from the key, peer_id and counter.
+    The key is added element wise modulo 2**16.
+    A combination of key, peer_id, counter shall be used only once. Otherwise encryption is
+    not secure anymore.
+    :param frame:
+    :param key:
+    :param peer_id:
+    :param counter:
+    :return: The encrypted signal as a np.ndarray.
+    """
+
+    key_signal = generate_key_stream(key, peer_id, counter, len(frame))
 
     # Add the key stream to the signal.
-    if decrypt:
-        return frame - key_signal
-    else:
-        return frame + key_signal
+    return frame + key_signal
 
 
-async def run_mic(send_packet: Callable[[TLVPacket], Coroutine],
-                  peer_id: int,
-                  _audio_processor: Optional[AudioProcessor] = None):
+def decrypt_audio_frame(frame: np.ndarray, key: bytes,
+                        peer_id: int,
+                        counter: int) -> np.ndarray:
     """
-    Read audio data and send it to the server.
+    Decrypt an audio frame by subtracting pseudo-random white noise
+    generated from the key, peer_id and counter.
+    A combination of key, peer_id, counter shall be used only once. Otherwise encryption is
+    not secure anymore.
+    :param frame:
+    :param key:
+    :param peer_id:
+    :param counter:
+    :return: The encrypted signal as a np.ndarray.
     """
-    logger.debug("Start microphone task.")
-    # Open audio input stream.
-    stream_in = audio.open(format=audio_format,
-                           channels=common.num_channels,
-                           rate=common.sample_rate,
-                           input=True,
-                           frames_per_buffer=common.frame_size)
 
-    try:
-        logger.debug('Start recording and sending audio.')
+    key_signal = generate_key_stream(key, peer_id, counter, len(frame))
 
-        nonce_counter = itertools.count(1)
-
-        while True:
-            await asyncio.sleep(0)
-
-            def read_from_mic() -> np.ndarray:
-                while stream_in.get_read_available() > 2 * common.frame_size * common.sample_size:
-                    # TODO: can this happen? Or is data discarded already by PyAudio?
-                    # Discard data to catch up.
-                    logger.debug('Discard mic data.')
-                    stream_in.read(common.frame_size)
-                frame = stream_in.read(common.frame_size)
-                # Convert bytes into ndarray.
-                signal = np.frombuffer(frame, dtype=common.sample_data_type)
-                return signal
-
-            # Read from mic in other thread.
-            loop = asyncio.get_event_loop()
-            frame = await loop.run_in_executor(thread_pool, read_from_mic)
-            assert isinstance(frame, np.ndarray), "Frame must be an np.ndarray."
-            frames = [frame]
-
-            if _audio_processor is not None:
-                # Push the audio frame through the processor.
-                frames = await _audio_processor.process(frames)
-
-            for frame in frames:
-                assert isinstance(frame, np.ndarray), f'Frame must be a np.ndarray not {type(frame)}.'
-                # Check if datatype is correct.
-                assert frame.dtype == common.sample_data_type, f"Wrong dtype: {frame.dtype}."
-
-                nonce = next(nonce_counter)
-
-                key = b"\00"*32 # TODO
-                frame_encrypted = encrypt_audio_frame(frame, key, peer_id, nonce)
-                frame_bytes = frame_encrypted.tobytes()
-
-                tag = np.array([(peer_id, nonce)], dtype=common.audio_tag_data_type)
-                # Send the packet if in transmission mode.
-                data = frame_bytes + tag.tobytes()
-                packet = TLVPacket(PacketType.AudioFrame, data,
-                                   dest_addr=1  # This is directed to the server (1).
-                                   )
-                # Write this frame to the server.
-                await send_packet(packet)
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:
-        logger.error("Microphone task interrupted: {}".format(type(e)))
-        print(e)
-
-    logger.debug('Microphone task ended.')
+    # Subtract the key stream to the signal.
+    return frame - key_signal
 
 
 async def run_speaker(audio_buffer: asyncio.Queue):
@@ -274,7 +243,8 @@ class Peer:
         self.msq_queue_in = asyncio.Queue()
         self.peer_id = peer_id
         self.password = password
-        self.peer_name = None
+        self.peer_name: Optional[str] = None
+        self.audio_encryption_key: Optional[bytes] = None
 
         # Connection to server.
         async def rx():
@@ -314,6 +284,11 @@ class Peer:
                     msg = d['chat_message']
                     if msg.strip():
                         print(f"{self.peer_name}: {msg}")
+                if 'audio_encryption_key' in d:
+                    hex_key = d['audio_encryption_key']
+                    logger.debug(f"Received audio encryption key: {hex_key}")
+                    key = bytes.fromhex(hex_key)
+                    self.audio_encryption_key = key
 
     async def send_to_peer(self, p: TLVPacket):
         """
@@ -352,11 +327,108 @@ class PTClient:
         self.password = password
         self.user_name = user_name
 
+        self.peer_id: Optional[int] = None
+
         # Main control connection to server.
         self.conn_ctrl: Optional[transport_enc.SecureConnection] = None
 
         # Other peers stored by their ID.
         self.peers: Dict[int, Peer] = dict()
+
+        # Key used to encrypt audio frame.
+        self.audio_encryption_key: bytes = nacl.utils.random(32)
+
+    def get_audio_encryption_key_of_peer(self, peer_id: int) -> Optional[bytes]:
+        """
+        Return the key that is used by the peer `peer_id` for encrypting audio frames.
+        `None` might be returned if the key is not known yet.
+        :param peer_id:
+        :return:
+        """
+        if peer_id == self.peer_id:
+            return self.audio_encryption_key
+
+        peer = self.peers[peer_id]
+        if peer is not None:
+            return peer.audio_encryption_key
+        return None
+
+    async def run_mic(self, send_packet: Callable[[TLVPacket], Coroutine],
+                      peer_id: int,
+                      _audio_processor: Optional[AudioProcessor] = None):
+        """
+        Read audio data and send it to the server.
+        """
+        logger.debug("Start microphone task.")
+        # Open audio input stream.
+        stream_in = audio.open(format=audio_format,
+                               channels=common.num_channels,
+                               rate=common.sample_rate,
+                               input=True,
+                               frames_per_buffer=common.frame_size)
+
+        try:
+            logger.debug('Start recording and sending audio.')
+
+            nonce_counter = itertools.count(1)
+
+            while True:
+                await asyncio.sleep(0)
+
+                def read_from_mic() -> np.ndarray:
+                    while stream_in.get_read_available() > 2 * common.frame_size * common.sample_size:
+                        # TODO: can this happen? Or is data discarded already by PyAudio?
+                        # Discard data to catch up.
+                        logger.debug('Discard mic data.')
+                        stream_in.read(common.frame_size)
+                    frame = stream_in.read(common.frame_size)
+                    # Convert bytes into ndarray.
+                    signal = np.frombuffer(frame, dtype=common.sample_data_type)
+                    return signal
+
+                # Read from mic in other thread.
+                loop = asyncio.get_event_loop()
+                frame = await loop.run_in_executor(thread_pool, read_from_mic)
+                assert isinstance(frame, np.ndarray), "Frame must be an np.ndarray."
+                frames = [frame]
+
+                if _audio_processor is not None:
+                    # Push the audio frame through the processor.
+                    frames = await _audio_processor.process(frames)
+
+                for frame in frames:
+                    assert isinstance(frame, np.ndarray), f'Frame must be a np.ndarray not {type(frame)}.'
+                    # Check if datatype is correct.
+                    assert frame.dtype == common.sample_data_type, f"Wrong dtype: {frame.dtype}."
+
+                    nonce = next(nonce_counter)
+
+                    # Encrypt the audio frame.
+                    key = self.audio_encryption_key
+                    if key is not None:
+                        # Encrypt frame.
+                        frame_encrypted = encrypt_audio_frame(frame, key, peer_id, nonce)
+                        frame_bytes = frame_encrypted.tobytes()
+
+                        # Construct tag with the sender ID and nonce used for encryption.
+                        tag = np.array([(peer_id, nonce)], dtype=common.audio_tag_data_type)
+                        # Send the packet if in transmission mode.
+                        data = frame_bytes + tag.tobytes()
+                        # Create a packet.
+                        packet = TLVPacket(PacketType.AudioFrame, data,
+                                           dest_addr=1  # This is directed to the server (1).
+                                           )
+                        # Write this frame to the server.
+                        await send_packet(packet)
+                    else:
+                        logger.debug("Audio encryption key is not yet known.")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Microphone task interrupted: {}".format(type(e)))
+            print(e)
+
+        logger.debug('Microphone task ended.')
 
     async def run_command_line_input(self):
         while True:
@@ -375,6 +447,14 @@ class PTClient:
                     await t
             except TimeoutError as e:
                 pass
+
+    async def say_hello_to_peer(self, peer: Peer):
+        # Send my user name and my audio encryption key to the peer.
+
+        await peer.send_to_peer(
+            TLVPacket.from_dict(user_name=self.user_name,
+                                audio_encryption_key=self.audio_encryption_key.hex())
+        )
 
     async def handle_control_packet(self,
                                     p: TLVPacket):
@@ -399,8 +479,10 @@ class PTClient:
                     peer = Peer(peer_id, self.conn_ctrl.write_packet,
                                 password=self.password, is_initiator=True)
                     self.peers[peer_id] = peer
-                    # Send my user name to the peer.
-                    asyncio.create_task(peer.send_to_peer(TLVPacket.from_dict(user_name=self.user_name)))
+
+                    # Send hello message to peer.
+                    asyncio.create_task(self.say_hello_to_peer(peer))
+
             elif event == 'peer_authenticated':
                 peer_id = d.get('peer_id')
                 logger.debug(f"Peer authenticated: {peer_id}")
@@ -422,7 +504,8 @@ class PTClient:
                 peer = Peer(peer_id, self.conn_ctrl.write_packet,
                             password=self.password, is_initiator=False)
                 self.peers[peer_id] = peer
-                asyncio.create_task(peer.send_to_peer(TLVPacket.from_dict(user_name=self.user_name)))
+                # Send hello message to peer.
+                asyncio.create_task(self.say_hello_to_peer(peer))
 
             # Pass the packet to the peer object.
             await peer.handle_packet_from_peer(p)
@@ -450,11 +533,19 @@ class PTClient:
                     # Convert frame to a numpy array.
                     frame = np.frombuffer(audio_data, dtype=common.sample_data_type)
                     audio_tags = np.frombuffer(tag_data, dtype=common.audio_tag_data_type)
-                    print(audio_tags)
 
-                    key = b"\00"*32 # TODO
+                    # Decrypt the frame by stripping away the encryption layers of all senders.
                     for peer_id, nonce in audio_tags:
-                        frame = encrypt_audio_frame(frame, key, peer_id, nonce, decrypt=True)
+                        key = self.get_audio_encryption_key_of_peer(peer_id)
+                        if key is None:
+                            # We don't have the key that was used to encrypt this frame.
+                            logger.debug(f"Cannot decrypt frame. Missing key of peer {peer_id}.")
+                            # Return attenuated white noise to
+                            # notify that a frame has not been decrypted.
+                            frame = frame / 64  # TODO: Return silence in final version.
+                            break
+                        else:
+                            frame = decrypt_audio_frame(frame, key, peer_id, nonce)
 
                     # Convert to 32 bit integer for signal processing.
                     frame = frame.astype(np.int)
@@ -536,8 +627,9 @@ class PTClient:
         msg = packet.to_dict()
         logger.debug(f'Server accepted: {msg}')
 
-        user_id = msg['user_id']
-        logger.debug(f'User ID: {user_id}')
+        peer_id = msg['user_id']
+        logger.debug(f'User ID: {peer_id}')
+        self.peer_id = peer_id  # Remember the ID.
 
         udp_stream_id = msg['udp_stream_id']
         logger.debug(f'UDP stream ID: {udp_stream_id}')
@@ -596,9 +688,9 @@ class PTClient:
             write_packet_mic = udp_conn.write_packet
         else:
             write_packet_mic = conn_encrypted.write_packet
-        task_mic = asyncio.create_task(run_mic(write_packet_mic,
-                                               peer_id=user_id,
-                                               _audio_processor=audio_processor))
+        task_mic = asyncio.create_task(self.run_mic(write_packet_mic,
+                                                    peer_id=peer_id,
+                                                    _audio_processor=audio_processor))
 
         task_tcp_receiver = asyncio.create_task(self.receive_from_server(conn_encrypted.read_packet, audio_buffer))
 
