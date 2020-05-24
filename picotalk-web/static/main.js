@@ -30,11 +30,13 @@ const server_id = 1
 
 // Define logging functions.
 function log(str) {
-    const logElement = document.querySelector('#log');
-    logElement.innerHTML += '<li>' + str + '</li>';
+    const logElement = document.querySelector('#log')
+    var listNode = document.createElement('li')
+    listNode.textContent = str
+    logElement.appendChild(listNode)
 
     // Scroll to bottom.
-    logElement.scrollTop = logElement.scrollHeight;
+    logElement.scrollTop = logElement.scrollHeight
 }
 
 // Define logging functions.
@@ -549,7 +551,7 @@ function gui_add_peer(peer_id, name) {
         node.id = "peer_"+peer_id
         divPeerList.appendChild(node)
     }
-    node.innerHTML = name + ` (${peer_id})`
+    node.textContent = name + ` (${peer_id})`
 }
 
 // Remove a displayed peer from the GUI.
@@ -564,7 +566,7 @@ function gui_remove_peer(peer_id) {
 function gui_display_chat_message(sender_name, msg) {
     var msglist = document.getElementById("chatMessages")
     var node = document.createElement("li")
-    node.innerHTML = sender_name + ": " + msg
+    node.textContent = sender_name + ": " + msg
     msglist.appendChild(node)
     // Scroll to bottom.
     msglist.scrollTop = msglist.scrollHeight;
@@ -1029,8 +1031,8 @@ async function main() {
     // Set a random room name as default if none was supplied in the URL.
     inputRoomName.value = url_parameters['room'] || random_room_name
 
-    document.getElementById("joinRoomConfirmName").innerHTML = room_name.value
-    document.getElementById("joinRoomConfirmServer").innerHTML = server_name
+    document.getElementById("joinRoomConfirmName").textContent = room_name.value
+    document.getElementById("joinRoomConfirmServer").textContent = server_name
 
     // Set server in GUI.
     document.getElementById("server_name").value = server_name;
@@ -1074,10 +1076,10 @@ async function main() {
         muted = is_muted
         if (muted) {
             info("You are now muted.")
-            btnToggleMute.innerHTML = "Unmute"
+            btnToggleMute.textContent = "Unmute"
         } else {
             info("You are now unmuted.")
-            btnToggleMute.innerHTML = "Mute"
+            btnToggleMute.textContent = "Mute"
         }
     }
 
@@ -1105,10 +1107,10 @@ async function main() {
         showLog = _showLog
         if (showLog) {
             divLog.style.display = "block"
-            btnShowLog.innerHTML = "Hide Log"
+            btnShowLog.textContent = "Hide Log"
         } else {
             divLog.style.display = "none"
-            btnShowLog.innerHTML = "Show Log"
+            btnShowLog.textContent = "Show Log"
         }
     }
 
