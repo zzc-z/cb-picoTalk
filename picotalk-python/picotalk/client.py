@@ -264,11 +264,21 @@ class Peer:
     """
 
     def __init__(self, peer_id: int, send_packet, password: bytes, is_initiator: bool):
+        """
+
+        :param peer_id: ID of the other peer.
+        :param send_packet: Async function for sending a packet to the server.
+        :param password: Password for the authenticated key exchange.
+        :param is_initiator: Tell if this local object initiates the key exchange.
+        """
         self.msq_queue_in = asyncio.Queue()
         self.peer_id = peer_id
         self.password = password
         self.peer_name: Optional[str] = None
         self.audio_encryption_key: Optional[bytes] = None
+
+        # Send packet to server.
+        self.send_packet = send_packet
 
         # Connection to server.
         async def rx():
@@ -278,11 +288,19 @@ class Peer:
             p.dest_addr = peer_id
             await send_packet(p)
 
-        self.conn_server = PeerConnection(rx, tx)
+        # Unencrypted connection to the peer.
+        self.conn_plain = PeerConnection(rx, tx)
         # End-to-end encrypted connection to peer.
         self.conn_e2e = asyncio.get_event_loop().create_future()
         asyncio.create_task(self.run_key_exchange(password, is_initiator))
         asyncio.create_task(self.run())
+
+    async def send_to_server(self, p: TLVPacket):
+        """
+        Send and address a packet to the server.
+        """
+        p.dest_addr = common.server_id
+        await self.send_packet(p)
 
     def close(self):
         """
@@ -327,17 +345,38 @@ class Peer:
         If the key exchange is successfull the 'self.conn_e2e' future will be set.
         """
         logger.debug(f"Run start key exchange with peer {self.peer_id}.")
-        shared_key = await transport_enc.password_authenticated_key_exchange(self.conn_server,
+        shared_key = await transport_enc.password_authenticated_key_exchange(self.conn_plain,
                                                                              password)
         logger.debug(f"Shared secret: {shared_key}.")
 
         box = nacl.secret.SecretBox(key=shared_key)
 
-        conn_e2e = transport_enc.SecureConnection(box, self.conn_server,
+        conn_e2e = transport_enc.SecureConnection(box, self.conn_plain,
                                                   is_initiator=is_initiator,
                                                   nonce=0)
 
-        self.conn_e2e.set_result(conn_e2e)
+        # Send confirmation packet over the encrypted channel.
+        tx = asyncio.create_task(conn_e2e.write_packet(TLVPacket.from_dict(status='ok')))
+        rx = conn_e2e.read_packet()
+
+        # TODO Handle reception of packets encrypted with wrong key.
+        # -> They signal that the key exchange was not successful, i.e. performed with
+        # different passwords.
+        response = await rx
+        await tx
+
+        d = response.to_dict()
+        if d.get('status') == 'ok':
+            # Key exchange was successful.
+            logger.debug("Key exchange was successful.")
+
+            # Notify the server that the peer is authenticated.
+            await self.send_to_server(TLVPacket.from_dict(event='peer_authenticated',
+                                                          peer_id=self.peer_id))
+
+            self.conn_e2e.set_result(conn_e2e)
+        else:
+            logger.warning("Key exchange failed.")
 
     async def handle_packet_from_peer(self, p: TLVPacket):
         logger.debug(f"Handle packet from peer {p.src_addr}, type={p.type}.")

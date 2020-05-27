@@ -166,15 +166,32 @@ class Room:
             self.logger.info(f"Closing the room: {self.room_id}")
             self.on_close()
 
+    def is_peer_authenticated(self, peer_id: int):
+        """
+        Test if the peer with this ID has been authenticated by the other peers.
+        Authentication should happen after the peer successfully run the
+        key exchange with an already authenticated peer.
+        The first peer in the room is authenticated by default.
+        :param peer_id:
+        :return:
+        """
+        return peer_id in self.authenticated_peers
+
     async def handle_control_packet(self, packet: TLVPacket):
-        if packet.type == PacketType.JSON:
-            d = packet.to_dict()
-            cmd = d.get('command')
-            if cmd == "accept_peer":
-                peer_id = d.get('peer_id')
-                pass
-        else:
-            logger.debug(f"Not handling packet of type {packet.type}")
+
+        src_peer_id = packet.src_addr
+
+        # Accept only commands of authenticated peers.
+        if self.is_peer_authenticated(src_peer_id):
+            if packet.type == PacketType.JSON:
+                d = packet.to_dict()
+                event = d.get('event')
+                if event == "peer_authenticated":
+                    peer_id = d.get('peer_id')
+                    await self.authenticate_peer(peer_id)
+                    pass
+            else:
+                logger.debug(f"Not handling packet of type {packet.type}")
 
     async def handle_addressed_packet(self, packet: TLVPacket):
 
@@ -183,9 +200,14 @@ class Room:
         dest_addr = packet.dest_addr
 
         if dest_addr == common.server_id:
-            # This packet is for the server.
-            await self.handle_control_packet(packet)
+            if packet.type == PacketType.AudioFrame:
+                # TODO Handle audio frames here.
+                pass
+            elif packet.type == PacketType.JSON:
+                # This packet is for the server.
+                await self.handle_control_packet(packet)
         else:
+            # This packet is for another peer.
             # Forward the packet if the destination peer is known.
             dest_peer = self.peers.get(dest_addr)
             if dest_peer is not None:
@@ -365,11 +387,15 @@ class Client:
 
         assert len(audio_tags) == 1, "Peer should attach exactly one tag."
         audio_tag = audio_tags[0]
-        assert audio_tag['peer_id'] == self.peer_id, f"Peer should not lie about its own peer_id ({audio_tag['peer_id']})."
+        assert audio_tag[
+                   'peer_id'] == self.peer_id, f"Peer should not lie about its own peer_id ({audio_tag['peer_id']})."
 
         await self.audio_queue_input.put((frame, audio_tag))
 
     async def run_connection(self):
+        """
+        Handle the connection to the client.
+        """
         logger.debug("Start client connection protocol.")
 
         # Send hello message to client.
@@ -425,12 +451,17 @@ class Client:
                         packet = await receive_packet()
 
                         # Remember where the packet came from.
+                        # This is important. Don't let the client
+                        # fake it's ID.
                         packet.src_addr = self.peer_id
 
                         if packet.dest_addr == common.server_id:
                             # Handle packets directed to server.
+                            # TODO: Make audio frames addressed to the server.
                             if packet.type == PacketType.AudioFrame:
-                                await self.handle_audio_packet(packet)
+                                if room.is_peer_authenticated(self.peer_id):
+                                    # Handle audio packet only if the peer is authenticated.
+                                    await self.handle_audio_packet(packet)
                             else:
                                 logger.info(f"Packet type not handled: {packet.type}")
                         else:

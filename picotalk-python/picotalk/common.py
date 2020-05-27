@@ -19,7 +19,7 @@
 #
 import numpy as np
 
-version = 0, 0, 19
+version = 0, 0, 20
 
 # Default server port.
 server_tcp_port = 9999
