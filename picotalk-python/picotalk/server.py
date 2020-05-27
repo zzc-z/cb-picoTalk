@@ -188,24 +188,24 @@ class Room:
                 event = d.get('event')
                 if event == "peer_authenticated":
                     peer_id = d.get('peer_id')
+                    logger.debug(f"Peer {peer_id} is authenticated.")
                     await self.authenticate_peer(peer_id)
                     pass
             else:
                 logger.debug(f"Not handling packet of type {packet.type}")
 
     async def handle_addressed_packet(self, packet: TLVPacket):
+        """
+        Handle a packet that is addressed to another peer.
+        :param packet:
+        """
 
         assert not self.is_closed, "Room has been closed."
 
         dest_addr = packet.dest_addr
 
         if dest_addr == common.server_id:
-            if packet.type == PacketType.AudioFrame:
-                # TODO Handle audio frames here.
-                pass
-            elif packet.type == PacketType.JSON:
-                # This packet is for the server.
-                await self.handle_control_packet(packet)
+            assert "This should have been handled before."
         else:
             # This packet is for another peer.
             # Forward the packet if the destination peer is known.
@@ -457,11 +457,13 @@ class Client:
 
                         if packet.dest_addr == common.server_id:
                             # Handle packets directed to server.
-                            # TODO: Make audio frames addressed to the server.
                             if packet.type == PacketType.AudioFrame:
                                 if room.is_peer_authenticated(self.peer_id):
                                     # Handle audio packet only if the peer is authenticated.
                                     await self.handle_audio_packet(packet)
+                            elif packet.type == PacketType.JSON:
+                                # This packet is for the server.
+                                await room.handle_control_packet(packet)
                             else:
                                 logger.info(f"Packet type not handled: {packet.type}")
                         else:

@@ -499,17 +499,11 @@ class PTClient:
             line = await loop.run_in_executor(thread_pool, sys.stdin.readline)
 
             # Send the line to all peers.
-            tasks = []
-
+            # TODO: Retrieve timeout exceptions.
             for p in self.peers.values():
                 t = asyncio.wait_for(p.send_to_peer(TLVPacket.from_dict(chat_message=line)),
                                      timeout=10)
-                tasks.append(t)
-            try:
-                for t in tasks:
-                    await t
-            except TimeoutError as e:
-                pass
+                asyncio.create_task(t)
 
     async def say_hello_to_peer(self, peer: Peer):
         # Send my user name and my audio encryption key to the peer.

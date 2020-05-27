@@ -27,7 +27,7 @@ server_udp_port = 9999
 server_websocket_port = 9998
 
 # Audio format.
-sample_rate = 2 ** 14
+sample_rate = 16000 #2 ** 14
 # Number of audio channels.
 num_channels = 1
 # Number of samples in an audio frame.

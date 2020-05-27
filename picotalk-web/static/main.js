@@ -20,7 +20,7 @@
 
 
 
-const version = [0, 0, 19]
+const version = [0, 0, 20]
 
 const sample_rate = 16000 // Audio sample rate.
 const frame_size = 512 // Number of samples in an audio frame.
@@ -456,6 +456,8 @@ class Peer {
         this.peer_name = null
         this.audio_encryption_key = null
 
+        this.send_packet_fn = send_packet_fn
+
         // Receive packet from peer.
         var _msg_queue = this.msg_queue_in
         async function rx() {
@@ -476,6 +478,12 @@ class Peer {
 
         this.conn_e2ee = this.run_key_exchange(password, is_initiator)
         this.run() // TODO Also terminate this somewhen.
+    }
+
+    // Send and address a packet to the server.
+    async send_to_server(p) {
+        p.dest_addr = server_id
+        await this.send_packet_fn(p)
     }
 
 //
@@ -529,6 +537,23 @@ class Peer {
         debug("E2EE Shared secret: " + hex(shared_key.slice(0, 4)) + "...")
 
         var conn_e2ee = new SecureConnection(shared_key, this.conn_server, is_initiator, 0)
+
+        // Check if the secure connection works.
+        conn_e2ee.sendPacket(Packet.createJson({status: 'ok'}))
+        var response = await conn_e2ee.receivePacket()
+        console.log(response.dataAsUint8())
+        var d = response.toJson()
+
+        if (d.status == 'ok') {
+            debug(`Key exchange successful with peer ${this.peer_id}.`)
+            // Notify the server that the peer is authenticated.
+            await this.send_to_server(Packet.createJson({event: 'peer_authenticated', peer_id: this.peer_id}))
+
+            return conn_e2ee
+        } else {
+            warning(`Key exchange failed with peer ${this.peer_id}.`)
+            return null
+        }
 
         return conn_e2ee
     }
@@ -820,7 +845,10 @@ async function main() {
                         if (key === null) {
                             // Can't decrypt the frame because the key is not known.
                             debug(`Encryption key not known for peer ${peer_id}.`)
-                            // TODO: fill frame with silence or lower-volume noise.
+                            // Frame with lower-volume noise.
+                            for (var i = 0; i < frame.length; i+=1) {
+                                frame[i] /= 8
+                            }
                             break
                         }
                         frame = decrypt_audio_frame(frame, key, peer_id, tag.nonce)
@@ -1010,7 +1038,6 @@ async function main() {
     if (is_joining_room) {
         divJoinRoomForm.style.display = 'none'
         divJoinRoomConfirm.style.display = 'flex'
-        divPeerList.style.display = 'flex'
     } else {
         divJoinRoomForm.style.display = 'flex'
     }
@@ -1053,9 +1080,10 @@ async function main() {
         btnJoin.disabled = true
         divJoinRoomConfirm.style.display = "none"
         divControlButtons.style.display = "flex"
+        divPeerList.style.display = "flex"
         divChat.style.display = "flex"
         var host = document.getElementById("server_name").value
-        var websocket_url = 'wss://' + host + '/ws'
+        var websocket_url = 'ws://' + host + '/ws' // TODO change to wss
         var room_name = inputRoomName.value
         var password = inputPassword.value
         var user_name = inputUserName.value
