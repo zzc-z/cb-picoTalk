@@ -1083,7 +1083,7 @@ async function main() {
         divPeerList.style.display = "flex"
         divChat.style.display = "flex"
         var host = document.getElementById("server_name").value
-        var websocket_url = 'ws://' + host + '/ws' // TODO change to wss
+        var websocket_url = 'wss://' + host + '/ws'
         var room_name = inputRoomName.value
         var password = inputPassword.value
         var user_name = inputUserName.value
