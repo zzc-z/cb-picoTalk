@@ -847,7 +847,7 @@ async function main() {
                             debug(`Encryption key not known for peer ${peer_id}.`)
                             // Frame with lower-volume noise.
                             for (var i = 0; i < frame.length; i+=1) {
-                                frame[i] /= 8
+                                frame[i] /= 16
                             }
                             break
                         }
@@ -951,9 +951,9 @@ async function main() {
                     // Resampling is performed on a sliding window.
                     var resample_frame_size = mic_sample_rate / 100
                     // Resample frame by frame.
-                    while (bufferOriginal.length >= resample_frame_size*sample_size) {
+                    while (bufferOriginal.length >= resample_frame_size*2) {
                         // https://github.com/rochars/wave-resampler
-                        var samples = bufferOriginal.slice(0, resample_frame_size*sample_size)
+                        var samples = bufferOriginal.slice(0, resample_frame_size*2)
                         // Resample!
                         var newSamples = waveResampler.resample(samples, mic_sample_rate, sample_rate);
                         newSamples = newSamples.slice(newSamples.length/4, newSamples.length/2 + newSamples.length/4)
