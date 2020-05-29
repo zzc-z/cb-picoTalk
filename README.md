@@ -1,6 +1,8 @@
 # PicoTalk
 
-PicoTalk aims to be a simple solution for group-calls. PicoTalk relies on a central server that is used for signalling and also routing and mixing of the audio signals. The goal is to provide true end-to-end encrypted group-calls such that the server does not have to be trusted. This is work-in-progress tough.
+PicoTalk aims to be a simple and privacy oriented solution for group-calls. PicoTalk relies on a central server that is used for signalling and also routing and mixing of the audio signals. The goal is to provide true end-to-end encrypted group-calls such that the server does not have to be trusted. This is work-in-progress tough.
+
+An example with a web user interface can be found here: https://talk.tkramer.ch
 
 *PicoTalk Python* is the main implementation of picoTalk.
 This includes a server and client program written in Python.
@@ -44,7 +46,7 @@ picotalk-server # Use --uvloop to use uvloop.
 ```
 
 # PicoTalk Web
-PicoTalk Web is a *picoTalk* client written in HTML/JavaScript that can be run from the browser.
+PicoTalk Web is a *picoTalk* client written in HTML and JavaScript that can be run from the browser.
 
-The web client can be run by opening `picotalk/web/static/index.html` in a browser or, alternatively,
+The web client can be run by opening `picotalk-web/static/index.html` in a browser or, alternatively,
 serving the HTML/JavaScript content using a web server.
