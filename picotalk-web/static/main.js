@@ -569,14 +569,22 @@ var divPeerList = document.getElementById('peerList')
 var inputChatMessage = document.getElementById('inputChatMessage')
 
 // Display a peer on the GUI or change it's name.
-function gui_add_peer(peer_id, name) {
+function gui_add_peer(peer_id, name, is_authenticated) {
     var node = document.getElementById("peer_"+peer_id)
     if (node === null) {
         node = document.createElement("button")
         node.id = "peer_"+peer_id
         divPeerList.appendChild(node)
     }
+
     node.textContent = name + ` (${peer_id})`
+}
+
+function gui_mark_peer_authenticated(peer_id) {
+    var node = document.getElementById("peer_"+peer_id)
+    if (node === null) {
+        // TODO
+    }
 }
 
 // Remove a displayed peer from the GUI.
@@ -624,7 +632,7 @@ async function main() {
     // Tell if microphone is muted or not.
     var muted = false
 
-    async function run(websocket_url, room_name, password, user_name, onstart, onend) {
+    async function run(websocket_url, room_name, password, user_name, on_success, on_error, on_close) {
 
 
         info("Password: " + password)
@@ -689,11 +697,12 @@ async function main() {
 
         sock.onerror = function (event) {
             error("Cannot connect to " + websocket_url)
+            on_error("Cannot connect to " + websocket_url)
         }
 
         sock.onclose = function(event) {
             debug("WS closed.")
-            onend()
+            on_close()
         }
 
         /// Send a packet over the WebSocket.
@@ -789,6 +798,16 @@ async function main() {
                     } else if (event == 'peer_disconnected') {
                         var peer_id = json.peer_id
                         gui_remove_peer(peer_id)
+                    } else if (event == 'peer_authenticated') {
+                        var peer_id = json.peer_id
+                        if (peer_id == my_peer_id) {
+                            // I'm successfully authenticated.
+                            on_success()
+                        } else {
+                            // Mark the peer as 'authenticated'.
+                            debug("Peer is authenticated: " + peer_id)
+                            gui_mark_peer_authenticated(peer_id)
+                        }
                     }
                 }
             } else {
@@ -1014,6 +1033,7 @@ async function main() {
     }
 
     var divJoinRoomForm = document.getElementById('joinRoomForm')
+    var divWaitForConnection = document.getElementById('waitToConnect')
     var divControlButtons = document.getElementById('controlButtons')
     var divJoinRoomConfirm = document.getElementById('joinRoomConfirm')
     var divChat = document.getElementById('divChat')
@@ -1077,11 +1097,18 @@ async function main() {
 
     const btnJoin = document.getElementById('btn_join');
     btnJoin.addEventListener('click', async () => {
-        btnJoin.disabled = true
+
         divJoinRoomConfirm.style.display = "none"
-        divControlButtons.style.display = "flex"
-        divPeerList.style.display = "flex"
-        divChat.style.display = "flex"
+        divWaitForConnection.style.display = "flex"
+
+        btnJoin.disabled = true
+        function on_success() {
+            divWaitForConnection.style.display = "none"
+            divControlButtons.style.display = "flex"
+            divPeerList.style.display = "flex"
+            divChat.style.display = "flex"
+        }
+
         var host = document.getElementById("server_name").value
         var websocket_url = 'wss://' + host + '/ws'
         var room_name = inputRoomName.value
@@ -1092,7 +1119,8 @@ async function main() {
             room_name,
             password,
             user_name,
-            () => {},
+            on_success, // on_success
+            () => {}, // on_error
             () => {btnConnect.disabled = false},
             )
     })
