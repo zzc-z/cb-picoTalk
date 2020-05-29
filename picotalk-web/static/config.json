@@ -1,3 +1,4 @@
 {
+  "comment": "default_server can be used to set the default server address in the web user interface. By default the current host name is used.",
   "default_server": null
 }
