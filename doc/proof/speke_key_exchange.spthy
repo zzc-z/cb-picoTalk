@@ -72,22 +72,14 @@ rule Responder_2:
     --[ SharedR($R, s) ]->
     [ !SessionKey($R, s) ]
 
-
-
-/*
-rule reveal_session_key:
-    [ !SessionKey(X, s) ]
-    --[ RevealKey(s) ]->
-    [ Out(s) ]
-*/
-
-
+// Send a data message encrypted with the session key.
 rule SendMessage:
     [ Fr(~msg), !SessionKey($I, key) ]
     --[ SendMessage($I, ~msg, key) ]->
     [ Out(senc(~msg, key)) ]
 
 
+// Receive a data message encrypted with the session key.
 rule ReceiveMessage:
     [ In(senc(msg_plain, key)), !SessionKey($R, key) ]
     --[ Received(msg_plain) ]->
@@ -140,10 +132,10 @@ lemma SPEKE_shared_key_secrecy:
 
 lemma SPEKE_initiator_shared_key_secrecy:
     "
-    // It cannot be that
+    // It cannot be
     not(
         Ex I s #j #k.
-            // initator computed a shared key 's'
+            // that the initator computed a shared key 's'
             SharedI(I, s) @ #j
             // and the adversary knows 's'
             & K(s) @ #k
@@ -152,6 +144,20 @@ lemma SPEKE_initiator_shared_key_secrecy:
     )
     "
 
+
+lemma SPEKE_responder_shared_key_secrecy:
+    "
+    // It cannot be
+    not(
+        Ex R s #j #k.
+            // that the responder computed a shared key 's'
+            SharedR(R, s) @ #j
+            // and the adversary knows 's'
+            & K(s) @ #k
+            // without the password having been revealed.
+            & not (Ex pw #r. RevealPassword(pw) @ #r)
+    )
+    "
 
 
 lemma SPEKE_message_secrecy:
