@@ -227,10 +227,10 @@ class SPEKE:
     """
 
     def __init__(self, password: bytes):
+        # Compute base point from the hashed password: p = H(password)
         p = nacl.hash.sha512(password,
                              encoder=nacl.encoding.RawEncoder)[:32]
-        # Compute base point from the hashed password: P = pG
-        self.generator = crypto_scalarmult_base(p)
+        self.generator = p
         self.__private_key = None
 
     def generate_public_key(self) -> bytes:

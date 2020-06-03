@@ -1,26 +1,36 @@
 theory SPEKE
 begin
 
-builtins: hashing, diffie-hellman, bilinear-pairing, symmetric-encryption
+//builtins: hashing, diffie-hellman, bilinear-pairing, symmetric-encryption
+builtins: hashing, diffie-hellman, symmetric-encryption
 
+// Chose a password that is shared by the two parties.
+// The adversary does not yet know the password but
+// could guess it because the password space is small.
 rule choose_password:
-    [ ]
-    --[ ChoosePassword() ]->
-    [ !Password($password) ]
+    [ Fr(~password) ]
+    --[ ChoosePassword(~password) ]->
+    [ !Password(~password) ]
     //[ !Password(diff($passwordA, $passwordB)) ]
+
+rule reveal_password:
+    [ !Password(pw) ]
+    --[ RevealPassword(pw) ]->
+    [ Out(pw) ]
 
 // Generate key pair and send public key.
 rule Initiator_1:
     let
         p = h(password)
         //P = pmult(p, $BasePoint) // Compute another base point based on password.
-        P = $BasePoint
-        pk_i = pmult(~sk_i, P) // Compute public key.
+        //P = $BasePoint^p // Compute another base point based on password.
+        //pk_i = pmult(~sk_i, P) // Compute public key.
+        pk_i = p^~sk_i // Compute public key.
     in
     // Generate a fresh private key.
     [ !Password(password), Fr(~sk_i) ]
     --[ Initialize($I, ~sk_i) ]->
-    [ Init1($I, ~sk_i), // Store key for next step.
+    [ HandshakeI_1($I, ~sk_i), // Store key for next step.
       Out(pk_i) // Send public key.
     ]
 
@@ -30,26 +40,46 @@ rule Responder_1:
     let
         p = h(password)
         //P = pmult(p, $BasePoint)
-        P = $BasePoint
-        pk_r = pmult(~sk_r, P) // Compute public key.
-        s = pmult(~sk_r, pk_i) // Compute shared secret.
+        //P = $BasePoint^p
+        //pk_r = pmult(~sk_r, P) // Compute public key.
+        pk_r = p^~sk_r // Compute public key.
+        //s = pmult(~sk_r, pk_i) // Compute shared secret.
+        s = pk_i^~sk_r // Compute shared secret.
     in
     // Receive public key from network and generate a fresh key pair.
     [ !Password(password), In(pk_i), Fr(~sk_r) ] 
-    --[ Respond(~sk_r), SharedR($R, s) ]->
-    // Send the public key.
-    [ Out(pk_r), !SessionKey($R, s) ]
+    -->
+    // Send the public key and confirmation message.
+    [ Out(<pk_r, senc('ok', s)>), HandshakeR_1($R, s) ]
 
 // Receive public key and compute shared secret.
+// Send a confirmation message to the responder encrypted with the shared secret.
 rule Initiator_2:
     let
-        s = pmult(sk_i, pk_r) // Shared secret.
+        //s = pmult(sk_i, pk_r) // Shared secret.
+        s = pk_r^sk_i // Shared secret.
     in
-    [ Init1($I, sk_i), // Retreive initiator and secret key from previous step.
-      In(pk_r) // Get public key from network.
+    [ HandshakeI_1($I, sk_i), // Retreive initiator and secret key from previous step.
+      In(<pk_r, senc('ok', s)>) // Get public key and confirmation message from the network.
     ]
     --[ SharedI($I, s) ]->
-    [ !SessionKey($I, s) ]
+    [ !SessionKey($I, s), Out(senc('ok', s)) ]
+
+// Accept confirmation message.
+// This completes the handshake.
+rule Responder_2:
+    [ HandshakeR_1($R, s), In(senc('ok', s)) ]
+    --[ SharedR($R, s) ]->
+    [ !SessionKey($R, s) ]
+
+
+
+/*
+rule reveal_session_key:
+    [ !SessionKey(X, s) ]
+    --[ RevealKey(s) ]->
+    [ Out(s) ]
+*/
 
 
 rule SendMessage:
@@ -62,10 +92,18 @@ rule ReceiveMessage:
     [ In(senc(msg_plain, key)), !SessionKey($R, key) ]
     --[ Received(msg_plain) ]->
     [ ]
-// restriction ChoosePassword_only_once:
-//     "
-//     All #i #j. ChoosePassword() @ #i & ChoosePassword() @ #j ==> #i = #j
-//     "
+
+
+lemma Password_secrecy:
+    "
+    // It cannot be that
+    not(
+        Ex pw #i #j. 
+            ChoosePassword(pw) @ #i & K(pw) @ #j // the adversary knows the shared password
+            & not (Ex #r. RevealPassword(pw) @ #r) // without the password having been revealed before.
+    )
+    "
+
 
 // It is possible that initiator and responder end up
 // with the same shared value. While initiator and 
@@ -78,11 +116,13 @@ lemma SPEKE_reachability_key_exchange:
         & not(I = R)
     "
 
+
 lemma SPEKE_reachability_send_message:
     exists-trace
     " Ex msg #i.
         Received(msg) @i
     "
+
 
 lemma SPEKE_shared_key_secrecy:
     "
@@ -97,6 +137,7 @@ lemma SPEKE_shared_key_secrecy:
     )
     "
 
+
 lemma SPEKE_initiator_shared_key_secrecy:
     "
     // It cannot be that
@@ -104,10 +145,14 @@ lemma SPEKE_initiator_shared_key_secrecy:
         Ex I s #j #k.
             // initator computed a shared key 's'
             SharedI(I, s) @ #j
-            // and the adversary knows 's'.
+            // and the adversary knows 's'
             & K(s) @ #k
+            // without the password having been revealed.
+            & not (Ex pw #r. RevealPassword(pw) @ #r)
     )
     "
+
+
 
 lemma SPEKE_message_secrecy:
     "
@@ -116,15 +161,12 @@ lemma SPEKE_message_secrecy:
         Ex I msg key #j #k.
             // the initiator sent a message
             SendMessage(I, msg, key) @ #j
-            // and the adversary knows 'msg'.
+            // and the adversary knows 'msg'
             & K(msg) @ #k
+            // without the password having been leaked
+            & not (Ex pw #r. RevealPassword(pw) @ #r)
         )
     "
 
-//lemma test:
-//    ( All sk_i s #j. SharedI(s) @ #j
-//        ==>
-//        (Ex #j)
-//    )
 
 end

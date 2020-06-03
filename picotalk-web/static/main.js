@@ -382,10 +382,10 @@ async function authenticatedKeyExchange(conn) {
 class SPEKE {
 
     constructor(password, salt = new Uint8Array(0)) {
+        // Compute base point from the hashed password: p = H(password)
         var p = hash(password)
 
-        // Compute base point from the hashed password: P = pG
-        this.generator = nacl.scalarMult.base(p)
+        this.generator = p
         this.__private_key = null
     }
 
