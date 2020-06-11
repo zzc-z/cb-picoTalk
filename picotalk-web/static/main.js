@@ -607,7 +607,6 @@ function gui_display_chat_message(sender_name, msg) {
 
 async function main() {
 
-
     // Load configuration from config.json.
     async function loadConfig() {
         var response = await fetch("config.json")
@@ -894,9 +893,9 @@ async function main() {
 
         async function run_speaker(audio_queue) {
             debug("Start speaker task.")
-            var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:16000});
+            var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
 
-            var bufferSize = 512;
+            var bufferSize = frame_size;
             var whiteNoise = audioContext.createScriptProcessor(bufferSize, 1, 1);
             whiteNoise.onaudioprocess = function(e) {
                 var output = e.outputBuffer.getChannelData(0);
@@ -924,7 +923,7 @@ async function main() {
             var constraints = {
                     audio: {
                         // Constraints seem to have little effect in Firefox.
-                        sampleRate: 16000,
+                        sampleRate: sample_rate,
                         sampleSize: 16,
                         echoCancellation: true,
                         autoGainControl: true,
@@ -936,11 +935,13 @@ async function main() {
                 debug("Try to open media stream.")
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 debug("Media stream opened: " + stream)
-                /* use the stream */
 
-                var audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:16000})
-                var mic_sample_rate = audioContext.sampleRate
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:16000})
+                const mic_sample_rate = audioContext.sampleRate
                 debug("Microphone stream sample rate: " + mic_sample_rate)
+                var track = stream.getAudioTracks()[0]
+                var track_settings = track.getSettings()
+                debug("Audio track settings: " + JSON.stringify(track_settings))
 
                 var audioInput = audioContext.createMediaStreamSource(stream);
 
