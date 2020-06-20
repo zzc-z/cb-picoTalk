@@ -50,3 +50,5 @@ PicoTalk Web is a *picoTalk* client written in HTML and JavaScript that can be r
 
 The web client can be run by opening `picotalk-web/static/index.html` in a browser or, alternatively,
 serving the HTML/JavaScript content using a web server.
+
+In contrast to other browser based voice call solutions this does not use WebRTC but simply WebSockets.
