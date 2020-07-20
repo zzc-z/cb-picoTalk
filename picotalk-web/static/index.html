@@ -27,7 +27,7 @@
 </head>
 <body>
 
-<div id="content">
+<div id="content" class="flexvertical">
 
     <h1>picoTalk <img src="logo_no_bg.svg" height="40px" style="margin-bottom: -5px"/></h1>
     <i>Simple and truly end-to-end encrypted voice calls.</i>
@@ -36,13 +36,13 @@
         <b>JavaScript must be enabled for this site!</b>
     </noscript>
 
-    <div class="box" id="joinRoomForm" style="display: none;">
+    <div class="box flexvertical" id="joinRoomForm" style="display: none;">
         <label>Room name</label><input type="text" id="room_name" value=""> <br />
         <label class="optional">Server</label><input type="text" class="optional" id="server_name" value=""> <br />
         <button id="btn_connect">Go</button>
     </div>
 
-    <div class="box" id="joinRoomConfirm" style="display: none;">
+    <div class="box flexvertical" id="joinRoomConfirm" style="display: none;">
         Join the room <b id="joinRoomConfirmName">...</b> <br />
         on server <b id="joinRoomConfirmServer">...</b> <br />
         <label>Name</label><input type="text" id="user_name" value="Anonymous"> <br />
@@ -54,18 +54,29 @@
         <i>Try to connect...</i>
     </div>
 
-    <div class="box" id="controlButtons" style="display: none;">
+    <div class="box flexhorizontal" id="controlButtons" style="display: none;">
         <button id="btnToggleMute">Mute</button>
         <button id="btnLeave">Leave</button>
     </div>
 
-    <div class="box" id="peerList" style="display: none;">
-    </div>
+    <div class="flexhorizontal">
 
-    <div class="box" id="divChat" style="display: none;">
-        <h3>Chat</h3>
-        <ul id="chatMessages"></ul>
-        <input type="text" id="inputChatMessage" />
+        <div class="box flexvertical" id="divPeerList" style="display: none;">
+            <h3>Peers</h3>
+            <ul id="peerList">
+                <li>You</li>
+            </ul>
+        </div>
+
+        <div class="box flexvertical" id="divChat" style="display: none;">
+            <h3>Chat</h3>
+            <ul id="chatMessages">
+                <li>Hello,</li>
+                <li>Write a message to the other peers here!</li>
+            </ul>
+            <input type="text" id="inputChatMessage" />
+        </div>
+
     </div>
 
     <div id="divShowLog">

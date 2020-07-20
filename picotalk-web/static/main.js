@@ -565,19 +565,20 @@ class Peer {
 }
 
 // Setup GUI elements.
-var divPeerList = document.getElementById('peerList')
+var divPeerList = document.getElementById('divPeerList')
+var ulPeerList = document.getElementById('peerList')
 var inputChatMessage = document.getElementById('inputChatMessage')
 
 // Display a peer on the GUI or change it's name.
 function gui_add_peer(peer_id, name, is_authenticated) {
     var node = document.getElementById("peer_"+peer_id)
     if (node === null) {
-        node = document.createElement("button")
+        node = document.createElement("li")
         node.id = "peer_"+peer_id
-        divPeerList.appendChild(node)
+        ulPeerList.appendChild(node)
     }
 
-    node.textContent = name + ` (${peer_id})`
+    node.textContent = name //+ ` (${peer_id})`
 }
 
 function gui_mark_peer_authenticated(peer_id) {

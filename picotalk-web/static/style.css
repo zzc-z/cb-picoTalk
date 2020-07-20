@@ -51,8 +51,7 @@ button:hover {
 
     width: 25%;
     min-width: 300px;
-    margin-bottom: 10px;
-    margin-top: 10px;
+    margin: 10px;
     word-wrap: break-word;
 }
 
@@ -71,27 +70,16 @@ input:hover {
     opacity: 0.5;
 }
 
-#content {
+.flexvertical {
     display: flex;
     align-items: center;
     flex-direction: column;
 }
 
-#joinRoomForm {
+.flexhorizontal {
     display: flex;
     align-items: center;
-    flex-direction: column;
-}
-
-#joinRoomConfirm{
-    display: flex;
-    align-items: center;
-    flex-direction: column;
-}
-
-#controlButtons {
-    display: flex;
-    align-items: center;
+    flex-direction: row;
 }
 
 #controlButtons button {
@@ -112,15 +100,36 @@ input:hover {
     overflow-y: scroll;
 }
 
+#divPeerList {
+    height: 300px;
+}
+
+#divPeerList ul {
+    height: 100%;
+    list-style: none;
+    list-style-type: none;
+}
+
+#peerList {
+    width: 90%;
+    overflow: hidden;
+    overflow-y: scroll;
+}
+
+#peerList li {
+    border-radius: 5px;
+    padding: 5px;
+    margin-bottom: 5px;
+    background: rgba(0, 0, 0, 0.1);
+}
+
 #divChat {
-    display: flex;
-    align-items: center;
-    flex-direction: column;
+    height: 300px;
 }
 
 #chatMessages {
+    height: 100%;
     width: 90%;
-    height: 200px;
     overflow: hidden;
     overflow-y: scroll;
 }
@@ -136,6 +145,7 @@ input:hover {
     margin-bottom: 5px;
     background: rgba(0, 0, 0, 0.1);
 }
+
 
 #chatMessages li:nth-child(odd) {
     background: rgba(255, 255, 255, 0.1);
