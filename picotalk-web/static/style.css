@@ -51,7 +51,10 @@ button:hover {
 
     width: 25%;
     min-width: 300px;
-    margin: 10px;
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: 10px;
+    margin-bottom: 10px;
     word-wrap: break-word;
 }
 
@@ -80,6 +83,7 @@ input:hover {
     display: flex;
     align-items: center;
     flex-direction: row;
+    flex-wrap: wrap-reverse;
 }
 
 #controlButtons button {
@@ -160,3 +164,4 @@ input:hover {
     width: 100%;
     text-align: center;
 }
+
