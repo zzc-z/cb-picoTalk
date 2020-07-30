@@ -4,7 +4,7 @@ PicoTalk aims to be a simple and privacy oriented solution for group-calls. Pico
 
 An example with a web user interface can be found here:
 
-* https://pages.codeberg.org/tok/picotalk
+* https://pages.codeberg.org/tok/talk
 * https://talk.tkramer.ch
 
 *PicoTalk Python* is the main implementation of picoTalk.
