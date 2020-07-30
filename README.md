@@ -2,7 +2,10 @@
 
 PicoTalk aims to be a simple and privacy oriented solution for group-calls. PicoTalk relies on a central server that is used for signalling and also routing and mixing of the audio signals. The goal is to provide true end-to-end encrypted group-calls such that the server does not have to be trusted. This is work-in-progress tough.
 
-An example with a web user interface can be found here: https://talk.tkramer.ch
+An example with a web user interface can be found here:
+
+* https://pages.codeberg.org/tok/picotalk
+* https://talk.tkramer.ch
 
 *PicoTalk Python* is the main implementation of picoTalk.
 This includes a server and client program written in Python.
