@@ -115,7 +115,8 @@ input:hover {
 }
 
 #peerList {
-    width: 90%;
+    width: 100%;
+    padding-left: 0%;
     overflow: hidden;
     overflow-y: scroll;
 }
@@ -133,7 +134,8 @@ input:hover {
 
 #chatMessages {
     height: 100%;
-    width: 90%;
+    width: 100%;
+    padding-left: 0%;
     overflow: hidden;
     overflow-y: scroll;
 }
