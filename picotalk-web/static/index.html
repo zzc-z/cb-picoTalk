@@ -40,8 +40,16 @@
     </noscript>
 
     <div class="box flexvertical" id="joinRoomForm" style="display: none;">
-        <label>Room name</label><input type="text" id="room_name" value=""> <br />
-        <label class="optional">Server</label><input type="text" class="optional" id="server_name" value=""> <br />
+        <label>Room name</label>
+        <span class="tooltip">
+            <input type="text" id="room_name" value=""> <br />
+            <span class="tooltiptext">Choose an arbitrary room name. Best something hard to guess.</span>
+        </span>
+        <label class="optional">Server</label>
+        <span class="tooltip">
+            <input type="text" class="optional" id="server_name" value=""> <br />
+            <span class="tooltiptext">Optionally define which server should be used for the call.</span>
+        </span>
         <button id="btn_connect">Go</button>
     </div>
 
@@ -49,7 +57,12 @@
         Join the room <b id="joinRoomConfirmName">...</b> <br />
         on server <b id="joinRoomConfirmServer">...</b> <br />
         <label>Name</label><input type="text" id="user_name" value="Anonymous"> <br />
-        <label>Password</label><input type="text" id="password" value=""> <br />
+        <label>Password</label>
+        <span class="tooltip">
+            <input type="text" id="password" value=""> <br />
+            <span class="tooltiptext">This is used to further secure the end-to-end encryption against man-in-the middle attacks.</span>
+        </span>
+
         <button id="btn_join">Join</button>
     </div>
 
@@ -82,8 +95,9 @@
 
     </div>
 
-    <div id="divShowLog">
+    <div id="divShowLog" class="tooltip">
         <a id="btnShowLog">Show Log</a>
+        <span class="tooltiptext">Show/hide debug information.</span>
     </div>
 
     <div class="box" id="divLog" style="display: none;">
