@@ -37,6 +37,7 @@ button {
     border: 0px;
     margin-top: 5px;
     background-color: rgba(255, 255, 255, 0.5);
+    transition: background-color 0.5s;
     border-radius: 5px;
 }
 
@@ -72,6 +73,7 @@ input:hover {
 
 .optional {
     opacity: 0.5;
+    transition: opacity 0.5s;
 }
 
 .flexvertical {
