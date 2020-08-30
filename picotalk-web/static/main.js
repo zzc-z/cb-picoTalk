@@ -632,14 +632,14 @@ async function main() {
     // Tell if microphone is muted or not.
     var muted = false
 
-    async function run(websocket_url, room_name, password, user_name, on_success, on_error, on_close) {
+    async function run(websocket_url, room_name, room_password, user_name, on_success, on_error, on_close) {
 
 
-        info("Password: " + password)
+        info("Password: " + room_password)
         info("User name: " + user_name)
 
         // Password for password authenticated key exchange.
-        var password = str2bytes(password)
+        var password = str2bytes(room_password)
 
         // Other peers.
         var peers = {}
