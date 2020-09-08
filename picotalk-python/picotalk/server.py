@@ -569,7 +569,7 @@ class Client:
             for t in all_tasks:
                 t.cancel()
         except Exception as e:
-            logger.debug("Exception: ", e)
+            logger.debug(f"Exception: {e}")
         finally:
             # Tear down the UDP stream.
             udp_conn.close()
