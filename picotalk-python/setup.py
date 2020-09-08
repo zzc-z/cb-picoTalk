@@ -26,7 +26,7 @@ def readme():
 
 
 setup(name='picotalk',
-      version='0.0.18',
+      version='0.0.20',
       description='Simple voice call tool.',
       long_description=readme(),
       long_description_content_type="text/markdown",
