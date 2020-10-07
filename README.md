@@ -19,7 +19,7 @@ Install the executables:
 git clone [this repo]
 cd [this repo]
 cd picotalk-python
-python3 setup.py --user develop
+python3 setup.py develop --user
 ```
 
 Install prerequisites:
