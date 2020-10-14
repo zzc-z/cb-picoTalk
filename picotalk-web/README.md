@@ -1,4 +1,11 @@
-# PicoTalk Web
+# Hosting PicoTalk Web
+
+WebSockets need some special treatment in the webserver configuration.
+
+The following gives hints on how to set up apache and nginx.
+Enabling HTTPS with Let's Encrypt certbot should work.
+
+Modern web-browsers will refuse to connect to a non-TLS WebSocket from a HTTPS site. The WebSocket served by picotalk is not TLS encrypted (just picotalk encrypted). This means you have to configure nginx as a reverse proxy which forwards wss://youserver.org/ws (port 443) to http://localhost:9998/ws (this is the running picotalk-server).
 
 ## Running PicoTalk with Apache2
 
@@ -29,3 +36,25 @@ Example Apache configuration:
 ```
 
 Make sure the modules `proxy_http` and `proxy_wstunnel` are enabled.
+
+## nginx
+
+This can be done like this (I should include it in the README):
+
+```
+server {
+
+        server_name yourserver.org;
+
+        location /ws {
+                proxy_pass http://localhost:9998/ws; # This points to the websocket served by picotalk-server.
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "Upgrade";
+                proxy_set_header Host $host;
+        }
+
+        # Incomplete. Must also host the static content here:
+        ...
+}
+```
