@@ -61,3 +61,5 @@ The web client can be run by opening `picotalk-web/static/index.html` in a brows
 serving the HTML/JavaScript content using a web server.
 
 In contrast to other browser based voice call solutions this does not use WebRTC but simply WebSockets.
+
+Installation instructions are [here](./picotalk-web/README.md).
