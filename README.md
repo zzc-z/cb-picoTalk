@@ -22,6 +22,12 @@ cd picotalk-python
 python3 setup.py develop --user
 ```
 
+Python installs the executable scripts by default into `$HOME/.local/bin`. This folder must be in the `PATH` environment variable. If it is not in the `PATH` variable yet it can be added by appending the following line to `.bashrc`:
+
+```bash
+export PATH=$PATH:$HOME/.local/bin
+```
+
 Install prerequisites:
 ```sh
 sudo apt install python3-pyaudio python3-numpy python3-scipy python3-aiohttp python3-nacl
