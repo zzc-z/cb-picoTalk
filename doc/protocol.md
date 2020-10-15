@@ -30,7 +30,13 @@ Audio frames are encrypted by element addition of a pseudo-random key-stream to 
 
 ## Transport encryption (client-to-server)
 
+Due to the end-to-end encryption the content secrecy of the voice call does *not* rely on the client-to-server encryption.
+
 Packets between the client and server are additionally encrypted with a secure channel protocol built around NaCl.
+
+**Note**: The current transport encryption does not resist man-in-the-middle attacks because the server identity key is not checked.
+
+The server identity keypair is still generated on the fly and is not persistent yet! The protocol (triple-DH) is designed to support a combination of a persistent identity keypair and a ephemeral keypair (for forward secrecy). The idea is that clients could do trust-on-first-sight: They could remember the server identity(if it would be persistent) and then notice future man in the middle attacks.
 
 ### HTTPS
 For the web user interface the connection to the server can and should be additionally TLS-encrypted.
