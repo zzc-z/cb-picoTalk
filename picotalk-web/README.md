@@ -39,13 +39,16 @@ Make sure the modules `proxy_http` and `proxy_wstunnel` are enabled.
 
 ## nginx
 
-This can be done like this:
+This is an example configuration for running the web client with Nginx.
+
+HTTPS support can be activated afterwards with the `certbot` tool (automatically gets a certificate from Let's Encrypt).
 
 ```
 server {
 
         server_name yourserver.org;
 
+        # Forward the WebSocket 'wss://yourserver.org/ws' to the WebSocket served by the picotalk-server.
         location /ws {
                 proxy_pass http://localhost:9998/ws; # This points to the websocket served by picotalk-server.
                 proxy_http_version 1.1;
@@ -54,7 +57,17 @@ server {
                 proxy_set_header Host $host;
         }
 
-        # Incomplete. Must also host the static content here:
-        ...
+        # Server static content for the web client.
+        location / { # Adapt this path to your needs. Maybe you'd like to have the web page under /talk, etc...
+                # This is the path to the directory which contains the static HTML and JS files for the web client.
+                root /var/www/html/picotalk-web-static;
+        }
+
 }
+```
+
+Example for activating HTTPS:
+
+```bash
+certbot --nginx -d yourserver.org
 ```
