@@ -897,8 +897,8 @@ async function main() {
             var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
 
             var bufferSize = frame_size;
-            var whiteNoise = audioContext.createScriptProcessor(bufferSize, 1, 1);
-            whiteNoise.onaudioprocess = function(e) {
+            var scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+            scriptProcessor.onaudioprocess = function(e) {
                 var output = e.outputBuffer.getChannelData(0);
                 for (var i = 0; i < bufferSize; i++) {
                     output[i] = 0;
@@ -911,7 +911,7 @@ async function main() {
                 }
             }
 
-            whiteNoise.connect(audioContext.destination);
+            scriptProcessor.connect(audioContext.destination);
         }
 
         // Start speaker task.
