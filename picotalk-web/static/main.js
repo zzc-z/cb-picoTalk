@@ -937,7 +937,7 @@ async function main() {
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 debug("Media stream opened: " + stream)
 
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:16000})
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:sample_rate})
                 const mic_sample_rate = audioContext.sampleRate
                 debug("Microphone stream sample rate: " + mic_sample_rate)
                 var track = stream.getAudioTracks()[0]
@@ -957,6 +957,7 @@ async function main() {
 
                 recorder.onaudioprocess = function (e) {
                     if (muted) {
+                        // Drop the audio frame when muted.
                         return
                     }
 
