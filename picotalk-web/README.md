@@ -32,6 +32,10 @@ Example Apache configuration:
 
         ProxyPassReverse /ws http://localhost:9998/ws
 
+        # Disable logs for privacy. Otherwise IP addresses are stored.
+        ErrorLog /dev/null
+        CustomLog /dev/null common
+
 </VirtualHost>
 ```
 
@@ -47,6 +51,10 @@ HTTPS support can be activated afterwards with the `certbot` tool (automatically
 server {
 
         server_name yourserver.org;
+        
+        # Disable logs for privacy. Otherwise IP addresses are stored.
+        access_log off;
+        error_log off;
 
         # Forward the WebSocket 'wss://yourserver.org/ws' to the WebSocket served by the picotalk-server.
         location /ws {
