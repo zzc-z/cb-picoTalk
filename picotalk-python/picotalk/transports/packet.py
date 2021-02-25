@@ -17,6 +17,12 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
+
+"""
+Data structure of the basic message packet that is sent between server and clients.
+Includes also serialization and deserialization.
+"""
+
 from enum import Enum
 import struct
 from typing import Dict, Tuple

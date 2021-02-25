@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
+
 """
 Secure channel as a wrapper around a `Connection`.
 """
@@ -57,9 +58,13 @@ class SecureConnection(Connection):
                  permit_dropped_packets: bool = False,
                  logger: Optional[logging.Logger] = None):
         """
+        :param box: The key that should be used for this connection is passed as a nacl `Box` or `SecretBox`.
+        The `Box` will be used for decrypting end encrypting packets.
         :param conn: Underlying connection.
         :param is_initiator: Tell if this instance is the protocol initiator.
             Needed against packet mirroring attacks.
+        :param nonce: This nonce allows to create multiple secure channels from the same `Box` object, i.e. from the same symmetric key.
+        **It MUST BE USED ONLY ONCE per key!**
         :param permit_dropped_packets: Allow to skip packets.
             However, packets will not be accepted in a different order.
         """
@@ -72,7 +77,7 @@ class SecureConnection(Connection):
         self.__counter = 1
         self.__counter_other = 1
 
-        assert 0 <= nonce < 256
+        assert 0 <= nonce < 256, "The nonce must fit in a single byte."
         self.__nonce = nonce
 
         self.permit_dropped_packets = permit_dropped_packets
@@ -164,11 +169,16 @@ async def authenticated_key_exchange(conn: Connection,
                                      private_identity_key: Optional[nacl.public.PrivateKey] = None
                                      ) -> nacl.secret.SecretBox:
     """
-    Do a triple-DH authenticated key exchange to derive a foward-secret shared key.
+    Do a triple-DH authenticated key exchange to derive a forward-secret shared key.
 
+    :param other_identity_key: The expected identity key of the other peer.
+    If this is set, then the key exchange only succeeds if the other end point really uses this key.
+    If this is `None`, then any identity key will be accepted.
+    :param initiator_role: Is the run of this method done as the initiator (`True`) of the handshake
+    or as the responder (`False`)?
     :param conn: Underlying insecure connection.
-    :param identity_key: Identity key of the other peer.
-    :param private_identity_key: Long-term private key.
+    :param private_identity_key: Long-term private key. If this is set to `None` a fresh keypair will
+    be used for each key exchange.
     """
 
     # Generate ephemeral client key pair.
@@ -177,6 +187,7 @@ async def authenticated_key_exchange(conn: Connection,
 
     if private_identity_key is None:
         # Generate a temporary 'fake' identity key.
+        # TODO: Can we re-use the ephemeral key pair?
         private_identity_key = PrivateKey.generate()
     public_identity_key = private_identity_key.public_key
 
@@ -264,6 +275,7 @@ async def password_authenticated_key_exchange(conn: Connection,
     """
     Do a password authenticated key exchange to derive a shared secret key.
 
+    :param password: The password that must be shared among the two parties.
     :param conn: Underlying insecure connection.
     """
 

@@ -18,6 +18,10 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+"""
+Implement packet transport over TCP.
+"""
+
 import asyncio
 import logging
 from typing import Callable, Coroutine

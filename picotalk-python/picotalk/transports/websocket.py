@@ -18,14 +18,17 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+"""
+Implement packet transport over WebSockets.
+"""
+
 import logging
-from typing import Any, Callable, Coroutine, Dict, Optional
+from typing import Any, Callable, Coroutine
 from .packet import TLVPacket
 from .base import Connection
+import aiohttp.web
 
 logger = logging.getLogger("WebSocketTransport")
-
-import aiohttp.web
 
 
 class WebSocketConnection(Connection):

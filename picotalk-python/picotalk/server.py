@@ -25,7 +25,7 @@ import numpy as np
 from typing import Any, Callable, Dict, Set
 import argparse
 import itertools
-from nacl.public import PublicKey, PrivateKey, Box
+from nacl.public import PublicKey, PrivateKey
 
 from . import common
 from .transports.packet import TLVPacket, PacketType
@@ -77,6 +77,7 @@ class Room:
         # Generate ephemeral room key pair.
         # This is remains a private key of the server.
         # The keypair is used to setup the transport encryption between clients and this room.
+        # TODO: Is this actually used?
         self.__private_key: PrivateKey = PrivateKey.generate()
         self.public_key: PublicKey = self.__private_key.public_key
 
