@@ -17,6 +17,11 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 #
+
+"""
+Constants used in both server and client implementation.
+"""
+
 import numpy as np
 
 version = 0, 0, 20
@@ -45,5 +50,5 @@ audio_tag_data_type = np.dtype([('peer_id', np.uint16), ('nonce', np.uint32)]).n
 uint8_t = np.dtype(np.uint8).newbyteorder('>')
 uint16_t = np.dtype(np.uint16).newbyteorder('>')
 
-# Identification (address) of server.
+# Identification (address) of server. Do not change this.
 server_id = 1
