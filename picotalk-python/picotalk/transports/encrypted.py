@@ -60,6 +60,7 @@ class SecureConnection(Connection):
         """
         :param box: The key that should be used for this connection is passed as a nacl `Box` or `SecretBox`.
         The `Box` will be used for decrypting end encrypting packets.
+        The `SecretBox` object could for instance originate from a key exchange done with `authenticated_key_exchange()`.
         :param conn: Underlying connection.
         :param is_initiator: Tell if this instance is the protocol initiator.
             Needed against packet mirroring attacks.
