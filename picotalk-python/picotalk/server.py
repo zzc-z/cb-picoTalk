@@ -75,6 +75,8 @@ class Room:
         self.is_closed = False
 
         # Generate ephemeral room key pair.
+        # This is remains a private key of the server.
+        # The keypair is used to setup the transport encryption between clients and this room.
         self.__private_key: PrivateKey = PrivateKey.generate()
         self.public_key: PublicKey = self.__private_key.public_key
 
@@ -93,6 +95,11 @@ class Room:
             await t
 
     async def authenticate_peer(self, peer_id: int):
+        """
+        This function should be called once a peer is authenticated (with the room password).
+        :param peer_id: ID of the authenticated peer.
+        :return:
+        """
         if peer_id not in self.authenticated_peers:
             self.authenticated_peers.add(peer_id)
 
@@ -178,17 +185,26 @@ class Room:
         return peer_id in self.authenticated_peers
 
     async def handle_control_packet(self, packet: TLVPacket):
+        """
+        Handle a packet with a control command.
+        :param packet: JSON message wrapped into a `TLVPacket`.
+        """
 
+        # Get peer ID that sent this packet.
         src_peer_id = packet.src_addr
 
         # Accept only commands of authenticated peers.
         if self.is_peer_authenticated(src_peer_id):
             if packet.type == PacketType.JSON:
+                # Parse JSON into a dict.
                 d = packet.to_dict()
+                # Get the type of event.
                 event = d.get('event')
                 if event == "peer_authenticated":
+                    # The source peer of this message tells us that it considers
+                    # another peer with `peer_id` as authenticated.
                     peer_id = d.get('peer_id')
-                    logger.debug(f"Peer {peer_id} is authenticated.")
+                    logger.debug(f"Peer {peer_id} is authenticated by peer {src_peer_id}.")
                     await self.authenticate_peer(peer_id)
                     pass
             else:
@@ -197,7 +213,7 @@ class Room:
     async def handle_addressed_packet(self, packet: TLVPacket):
         """
         Handle a packet that is addressed to another peer.
-        :param packet:
+        It is treated as a direct message and forwarded only to its destination.
         """
 
         assert not self.is_closed, "Room has been closed."
@@ -205,6 +221,8 @@ class Room:
         dest_addr = packet.dest_addr
 
         if dest_addr == common.server_id:
+            # The target is the server.
+            # If this happens, then there's a bug in the server program.
             assert "This should have been handled before."
         else:
             # This packet is for another peer.
@@ -214,6 +232,7 @@ class Room:
                 # Forward the packet to the destination.
                 await dest_peer.conn.write_packet(packet)
             else:
+                # Drop the packet.
                 logger.debug(f'Destination not known {dest_addr}.')
 
     async def run_audio_mixer(self):
@@ -236,27 +255,36 @@ class Room:
                 await asyncio.sleep(slack)
             next_chunk_time += chunk_duration
 
-            # Read all available chunks.
+            # Collect the oldest audio frame (including encryption tag)
+            # from each peer.
             current_frames_and_tags = dict()
+
             for peer in self.peers.values():
+                # Get the audio queue with audio frames from the peer.
                 q = peer.audio_queue_input
 
                 if q.full():
                     # Have to catch up with latency and drop a frame.
                     logger.debug("Drop frame to catch up with latency.")
+                    # Drop a frame.
                     q.get_nowait()
 
                 if q.qsize() > 0:
+                    # Get the next audio frame and its tag.
+                    # The tag tells which keystreams have been added to the frame.
+                    # When summing up the frames, the server needs to concatenate the tags
+                    # such that the clients can subtract the correct keystreams from the audio frame.
                     frame, tag = q.get_nowait()
                     assert isinstance(frame, np.ndarray)
-                    assert isinstance(tags, np.ndarray)
+                    assert isinstance(tag, np.ndarray)
+                    # Audio frames need to have a fixed size.
                     if frame.shape == (common.frame_size,):
                         current_frames_and_tags[peer] = frame, tag
                     else:
                         logger.debug(f"Skip frame of size {frame.shape}")
 
-            # Compute output chunks for each peer.
-            # And send the chunk to the peer.
+            # Compute output frames for each peer.
+            # And send the frame to the peer.
             for peer_out in self.peers.values():
 
                 # Sum all chunks that don't come from the destination.
@@ -264,9 +292,14 @@ class Room:
                 output_frame = silence.copy()
 
                 for peer, (frame, tag) in current_frames_and_tags.items():
-                    if peer != peer_out or debug_echo:  # Send back the audio of this peer to herself if debug_echo is set.
+                    if peer != peer_out or debug_echo:
+                        # Send back the audio of this peer to herself if debug_echo is set.
                         output_frame += frame
-                        tags.append(tag)  # Remember who are the senders and which nonces did they use.
+                        # Remember who are the senders and which nonces did they use.
+                        tags.append(tag)
+                    else:
+                        # Don't echo back to the origin of the frame.
+                        pass
 
                 # Convert to a numpy array.
                 tags = np.array(tags)
@@ -281,7 +314,8 @@ class Room:
         logger.debug("Mixer task ended.")
 
 
-# Singleton dictionary of rooms.
+# Singleton dictionary of rooms, indexed by room IDs
+# (typically hashes of room names, but that is up to the client).
 rooms: Dict[str, Room] = dict()
 
 
@@ -335,6 +369,9 @@ class Client:
         self.peer_id: int = 0
 
         # Audio queues to and from the mixer.
+        # TODO: What is the perfect size? Should it be adaptive?
+        # Larger sizes increase the maximal latency but also help buffering
+        # in case of short connection disruptions.
         audio_queue_size = 5
         self.audio_queue_input: asyncio.Queue = asyncio.Queue(maxsize=audio_queue_size)
         self.audio_queue_output: asyncio.Queue = asyncio.Queue(maxsize=audio_queue_size)
