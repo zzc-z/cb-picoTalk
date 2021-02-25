@@ -276,7 +276,7 @@ class Room:
                     # such that the clients can subtract the correct keystreams from the audio frame.
                     frame, tag = q.get_nowait()
                     assert isinstance(frame, np.ndarray)
-                    assert isinstance(tag, np.ndarray)
+                    assert isinstance(tags, np.ndarray)
                     # Audio frames need to have a fixed size.
                     if frame.shape == (common.frame_size,):
                         current_frames_and_tags[peer] = frame, tag
@@ -429,9 +429,12 @@ class Client:
 
         await self.audio_queue_input.put((frame, audio_tag))
 
-    async def run_connection(self):
+    async def run_connection(self, server_udp_port: int):
         """
         Handle the connection to the client.
+
+        :param server_udp_port: The listening UDP port of this server.
+        This will be sent to the client for establishing an additional UDP connection.
         """
         logger.debug("Start client connection protocol.")
 
@@ -454,6 +457,11 @@ class Client:
         await room.register_peer(self)
         assert self.peer_id != 0  # ID should be set now.
 
+        # Variable for the UDP connection handle (if one will be established).
+        udp_conn = None
+
+        # Try to setup a UDP connection with the client.
+        # The UDP connection is used for audio frames in parallel to the other connection.
         try:
             # Generate a fresh stream ID for routing the UDP packets.
             udp_stream_id = transport_udp.UdpPacketRouter.random_stream_id()
@@ -468,20 +476,24 @@ class Client:
                                                       permit_dropped_packets=True)
 
             # Send accept-message to the client.
+            # Tell the client which stream ID is used for the UDP connection.
             await self.conn.write_packet(
                 TLVPacket.from_dict(
                     user_id=self.peer_id,
-                    udp_port=common.server_udp_port,  # TODO: specify this as argument.
+                    udp_port=server_udp_port,
                     udp_stream_id=udp_stream_id
                 )
             )
 
+            # Create an event that tells when the client connection is terminated or
+            # shall be terminated.
             client_shutdown = asyncio.Event()
 
             async def receiver_task(receive_packet):
                 """
                 Read data from the `reader` and push it into the queue.
                 """
+
                 logger.debug("Starting receiver task.")
                 try:
                     while not client_shutdown.is_set():
@@ -492,20 +504,26 @@ class Client:
                         # fake it's ID.
                         packet.src_addr = self.peer_id
 
+                        # Handle packets based on their destination.
                         if packet.dest_addr == common.server_id:
                             # Handle packets directed to server.
                             if packet.type == PacketType.AudioFrame:
                                 if room.is_peer_authenticated(self.peer_id):
                                     # Handle audio packet only if the peer is authenticated.
                                     await self.handle_audio_packet(packet)
+                                else:
+                                    # Peer is not authenticated, drop the audio frame.
+                                    pass
                             elif packet.type == PacketType.JSON:
                                 # This packet is for the server.
                                 await room.handle_control_packet(packet)
                             else:
-                                logger.info(f"Packet type not handled: {packet.type}")
+                                # Not a supported type of packet.
+                                logger.debug(f"Packet type not handled: {packet.type}")
                         else:
                             # Handle packets directed to another peer.
                             await room.handle_addressed_packet(packet)
+
                 except ConnectionError as e:
                     logger.info(f"Connection aborted: {self.addr}")
                 except asyncio.IncompleteReadError as e:
@@ -565,6 +583,7 @@ class Client:
 
             use_udp = False
             # Wait for client to decide whether to use UDP or not.
+            # This is sent over the established connection.
             client_udp_request = await self.conn.read_packet()
             msg = client_udp_request.to_dict()
             if msg['use_udp']:
@@ -576,6 +595,7 @@ class Client:
                 # UDP connection will not be used. Close it.
                 udp_conn.close()
 
+            # List of async tasks that are started. They need to be awaited later.
             all_tasks = []
 
             # Start reader and writer task.
@@ -586,6 +606,9 @@ class Client:
 
             if use_udp:
                 # Start reader on UDP connection.
+                # This works in parallel to the other receiver task.
+                # In principle the client can send packets on each of them.
+                # Typically this will be used now for audio frames.
                 _udp_receiver_task = asyncio.create_task(receiver_task(
                     udp_conn.read_packet
                 ))
@@ -609,14 +632,18 @@ class Client:
             logger.debug(f"Exception: {e}")
         finally:
             # Tear down the UDP stream.
-            udp_conn.close()
+            if udp_conn is not None:
+                udp_conn.close()
             # Remove this peer from the room.
             room.remove_peer(self)
 
             logger.debug("Client connection protocol ended.")
 
 
-async def run_tcp_server(server_addr: str, server_port: int, udp_router: transport_udp.UdpPacketRouter):
+async def run_tcp_server(server_addr: str,
+                         server_port: int,
+                         server_udp_port: int,
+                         udp_router: transport_udp.UdpPacketRouter):
     logger.info(f"Starting TCP server on {server_addr}:{server_port}")
 
     async def handle_client_tcp(conn: Connection):
@@ -632,7 +659,7 @@ async def run_tcp_server(server_addr: str, server_port: int, udp_router: transpo
                         udp_router=udp_router
                         )
 
-        client_task = asyncio.create_task(client.run_connection())
+        client_task = asyncio.create_task(client.run_connection(server_udp_port=server_udp_port))
         await client_task
         logger.info(f"Handle client finished {addr}")
         conn.close()
@@ -644,7 +671,10 @@ async def run_tcp_server(server_addr: str, server_port: int, udp_router: transpo
     )
 
 
-async def run_websocket_server(server_addr: str, server_port: int, udp_router: transport_udp.UdpPacketRouter):
+async def run_websocket_server(server_addr: str,
+                               server_port: int,
+                               server_udp_port: int,
+                               udp_router: transport_udp.UdpPacketRouter):
     logger.info(f"Starting WebSocket server on {server_addr}:{server_port}")
 
     async def handle_connection(conn: Connection):
@@ -660,7 +690,7 @@ async def run_websocket_server(server_addr: str, server_port: int, udp_router: t
                         udp_router=udp_router
                         )
 
-        client_task = asyncio.create_task(client.run_connection())
+        client_task = asyncio.create_task(client.run_connection(server_udp_port=server_udp_port))
         await client_task
         logger.info(f"Handle client finished {addr}")
         conn.close()
@@ -690,11 +720,22 @@ async def print_stats(interval: int = 60):
 async def run_server(server_addr: str, server_tcp_port: int, server_udp_port: int, server_websocket_port: int):
     # Start statistic logger tasks.
     asyncio.create_task(print_stats(60))
-    # Open UDP transport.
+    # Open the UDP transport.
     udp_router = await transport_udp.run_udp_server(None, server_addr, server_udp_port)
     # udp_packet_router.transport = udp_transport
-    task_tcp = asyncio.create_task(run_tcp_server(server_addr, server_tcp_port, udp_router=udp_router))
-    task_ws = asyncio.create_task(run_websocket_server(server_addr, server_websocket_port, udp_router=udp_router))
+
+    # Create the TCP server.
+    task_tcp = asyncio.create_task(run_tcp_server(server_addr,
+                                                  server_tcp_port,
+                                                  server_udp_port,
+                                                  udp_router=udp_router))
+
+    # Create the WebSocket server.
+    task_ws = asyncio.create_task(run_websocket_server(server_addr,
+                                                       server_websocket_port,
+                                                       server_udp_port,
+                                                       udp_router=udp_router))
+
     await task_tcp
     await task_ws
     logger.info("Server stopped.")
@@ -723,6 +764,9 @@ def main():
     parser.add_argument('--uvloop', action='store_true',
                         help="Use 'uvloop' as eventloop.")
     args = parser.parse_args()
+
+    # Store common server settings.
+    common.server_udp_port = args.udp_port
 
     if args.uvloop:
         try:
