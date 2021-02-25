@@ -442,10 +442,10 @@ class Client:
         # Send hello message to client.
         await self.protocol_00_send_hello()
 
-        # Derive shared secret.
+        # Start the key exchange protocol to derive a shared secret between server and client.
         box = await transport_enc.authenticated_key_exchange(self.conn_insecure, initiator_role=False)
 
-        # Setup encrypted connection.
+        # Use the derived secret to setup an encrypted connection.
         self.conn = transport_enc.SecureConnection(box, self.conn_insecure, is_initiator=False, nonce=1)
 
         # Read client-hello message.
