@@ -383,7 +383,7 @@ class Peer:
         self.msq_queue_in.put_nowait(p)
 
 
-class PTClient:
+class PicoTalkClient:
 
     def __init__(self, password: bytes, user_name: str):
 
@@ -830,7 +830,7 @@ def main():
 
     audio_processor = AudioProcessorPipeline(*pipeline)
 
-    client = PTClient(password=password, user_name=args.user)
+    client = PicoTalkClient(password=password, user_name=args.user)
 
     asyncio.run(client.run(server_addr=args.server,
                            server_port=args.port,
