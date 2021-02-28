@@ -129,6 +129,7 @@ function generate_key_stream(key, peer_id, counter, length) {
     return key_signal
 }
 
+// Add the keystream to the audio frame.
 function encrypt_audio_frame(frame, key, peer_id, counter) {
     var key_signal = generate_key_stream(key, peer_id, counter, frame.length)
     var encrypted = new Int16Array(frame.length)
@@ -138,6 +139,7 @@ function encrypt_audio_frame(frame, key, peer_id, counter) {
     return encrypted
 }
 
+// Subtract the keystream from the audio frame.
 function decrypt_audio_frame(frame, key, peer_id, counter) {
     var key_signal = generate_key_stream(key, peer_id, counter, frame.length)
     var decrypted = new Int16Array(frame.length)
@@ -530,7 +532,7 @@ class Peer {
     }
 
     //  Run authenticated key exchange with other peer.
-    //  If the key exchange is successfull the 'this.conn_e2ee' future will be set.
+    //  If the key exchange is successful the 'this.conn_e2ee' future will be set.
     async run_key_exchange(password, is_initiator) {
         debug("Start key exchange with peer " + this.peer_id)
         var shared_key = await password_authenticated_key_exchange(this.conn_server, password)
