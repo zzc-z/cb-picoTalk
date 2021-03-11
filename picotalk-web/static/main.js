@@ -609,6 +609,8 @@ function gui_display_chat_message(sender_name, msg) {
 }
 
 async function main() {
+    
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)()
 
     // Load configuration from config.json.
     async function loadConfig() {
@@ -896,7 +898,14 @@ async function main() {
 
         async function run_speaker(audio_queue) {
             debug("Start speaker task.")
-            var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
+            //var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
+            
+            var speaker_sample_rate = audioContext.sampleRate
+            debug("Speaker sample rate: " + speaker_sample_rate)
+            
+            // Create empty buffers.
+            var bufferOriginal = new Float32Array(0)
+            var bufferResampled = new Float32Array(0)
 
             var bufferSize = frame_size;
             var scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
@@ -907,11 +916,68 @@ async function main() {
                 }
                 if (!audio_queue.is_empty()) {
                     var audio = audio_queue.get_nowait()
+                    
+                    var samples = new Float32Array(bufferSize);
                     for (var i = 0; i < bufferSize; i++) {
-                        output[i] = audio[i] *1.0/ (1<<15);
+                        samples[i] = audio[i] * 1.0 / (1<<15); // Convert to float.
+                    }
+                    
+                    // Append frame to non-resampled buffer.
+                    bufferOriginal = concatTypedArray(bufferOriginal, samples)
+
+                    // Microphone sample rate is assumed to be a multiple of 100.
+                    // Also the target sample rate is assumed to be a multiple of 100.
+                    // Resampling is performed on a sliding window.
+                    var resample_frame_size = speaker_sample_rate / 100
+                    // Resample frame by frame.
+                    while (bufferOriginal.length >= resample_frame_size*2) {
+                        // https://github.com/rochars/wave-resampler
+                        var samples = bufferOriginal.slice(0, resample_frame_size*2)
+                        // Resample!
+                        var newSamples = waveResampler.resample(samples, sample_rate, speaker_sample_rate);
+                        newSamples = newSamples.slice(newSamples.length/4, newSamples.length/2 + newSamples.length/4)
+
+                        // Append the resampled frame to the buffer.
+                        bufferResampled = concatTypedArray(bufferResampled, newSamples)
+
+                        // Remove the processed frame from the buffer.
+                        bufferOriginal = bufferOriginal.slice(resample_frame_size)
+                    }
+                }
+            
+            
+                if (bufferResampled.length >= bufferSize) {
+                    frame = bufferResampled.slice(0, bufferSize)
+
+                    for (var i = 0; i < bufferSize; i++) {
+                            output[i] = frame[i];
+                    }
+                    
+                    // Remove processed data.
+                    bufferResampled = bufferResampled.slice(frame_size)
+                }
+            }
+            
+            
+            /*
+            // Version with correct speaker sample rate. Here no resampling is necessary, but echo cancellation does not work.
+            var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
+            debug("Speaker sample rate: " + audioContext.sampleRate)
+            var bufferSize = frame_size;
+            var scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+            scriptProcessor.onaudioprocess = function(e) {
+                var output = e.outputBuffer.getChannelData(0);
+                for (var i = 0; i < bufferSize; i++) {
+                    output[i] = 0;
+                }
+                if (!audio_queue.is_empty()) {
+                    var audio = audio_queue.get_nowait()
+                    for (var i = 0; i < bufferSize; i++) {
+                        output[i] = audio[i] * 1.0 / (1<<15); // Convert to float.
                     }
                 }
             }
+            */
 
             scriptProcessor.connect(audioContext.destination);
         }
@@ -939,7 +1005,7 @@ async function main() {
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 debug("Media stream opened: " + stream)
 
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:sample_rate})
+                //const audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:sample_rate})
                 const mic_sample_rate = audioContext.sampleRate
                 debug("Microphone stream sample rate: " + mic_sample_rate)
                 var track = stream.getAudioTracks()[0]
