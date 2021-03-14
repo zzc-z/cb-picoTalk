@@ -610,8 +610,16 @@ function gui_display_chat_message(sender_name, msg) {
 
 async function main() {
     
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)()
-    //const audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
+    const AudioContext = (window.AudioContext || window.webkitAudioContext)
+    var audioContext = null
+    
+    function getAudioContext() {
+        if (audioContext == null) {
+            audioContext = new AudioContext()
+            //const audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
+        }
+        return audioContext
+    }
 
     // Load configuration from config.json.
     async function loadConfig() {
@@ -901,7 +909,7 @@ async function main() {
             debug("Start speaker task.")
             //var audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
             
-            var speaker_sample_rate = audioContext.sampleRate
+            var speaker_sample_rate = getAudioContext().sampleRate
             debug("Speaker sample rate: " + speaker_sample_rate)
             
             // Create empty buffers.
@@ -909,7 +917,7 @@ async function main() {
             var bufferResampled = new Float32Array(0)
 
             var bufferSize = frame_size;
-            var scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+            var scriptProcessor = getAudioContext().createScriptProcessor(bufferSize, 1, 1);
             var floatSamples = new Float32Array(bufferSize);
             scriptProcessor.onaudioprocess = function(e) {
                 var output = e.outputBuffer.getChannelData(0);
@@ -980,7 +988,7 @@ async function main() {
             }
             */
 
-            scriptProcessor.connect(audioContext.destination);
+            scriptProcessor.connect(getAudioContext().destination);
         }
 
         // Start speaker task.
@@ -1007,15 +1015,15 @@ async function main() {
                 debug("Media stream opened: " + stream)
 
                 //const audioContext = new (window.AudioContext || window.webkitAudioContext)() // ({sampleRate:sample_rate})
-                const mic_sample_rate = audioContext.sampleRate
+                const mic_sample_rate = getAudioContext().sampleRate
                 debug("Microphone stream sample rate: " + mic_sample_rate)
                 var track = stream.getAudioTracks()[0]
                 var track_settings = track.getSettings()
                 debug("Audio track settings: " + JSON.stringify(track_settings))
 
-                var audioInput = audioContext.createMediaStreamSource(stream);
+                var audioInput = getAudioContext().createMediaStreamSource(stream);
 
-                var recorder = audioContext.createScriptProcessor(4096, 1, 1);
+                var recorder = getAudioContext().createScriptProcessor(4096, 1, 1);
 
                 // Create empty buffers.
                 var bufferOriginal = new Float32Array(0)
@@ -1088,7 +1096,7 @@ async function main() {
                 }
 
                 audioInput.connect(recorder);
-                recorder.connect(audioContext.destination);
+                recorder.connect(getAudioContext().destination);
 
             } catch(err) {
                 /* handle the error */
