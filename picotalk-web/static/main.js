@@ -611,6 +611,7 @@ function gui_display_chat_message(sender_name, msg) {
 async function main() {
     
     const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+    //const audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
 
     // Load configuration from config.json.
     async function loadConfig() {
@@ -909,6 +910,7 @@ async function main() {
 
             var bufferSize = frame_size;
             var scriptProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+            var floatSamples = new Float32Array(bufferSize);
             scriptProcessor.onaudioprocess = function(e) {
                 var output = e.outputBuffer.getChannelData(0);
                 for (var i = 0; i < bufferSize; i++) {
@@ -917,13 +919,12 @@ async function main() {
                 if (!audio_queue.is_empty()) {
                     var audio = audio_queue.get_nowait()
                     
-                    var samples = new Float32Array(bufferSize);
                     for (var i = 0; i < bufferSize; i++) {
-                        samples[i] = audio[i] * 1.0 / (1<<15); // Convert to float.
+                        floatSamples[i] = audio[i] * 1.0 / (1<<15); // Convert to float.
                     }
                     
                     // Append frame to non-resampled buffer.
-                    bufferOriginal = concatTypedArray(bufferOriginal, samples)
+                    bufferOriginal = concatTypedArray(bufferOriginal, floatSamples)
 
                     // Microphone sample rate is assumed to be a multiple of 100.
                     // Also the target sample rate is assumed to be a multiple of 100.
