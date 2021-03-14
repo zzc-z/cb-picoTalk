@@ -543,7 +543,7 @@ class Peer {
         // Check if the secure connection works.
         conn_e2ee.sendPacket(Packet.createJson({status: 'ok'}))
         var response = await conn_e2ee.receivePacket()
-        console.log(response.dataAsUint8())
+
         var d = response.toJson()
 
         if (d.status == 'ok') {
@@ -769,9 +769,9 @@ async function main() {
         await conn.sendPacket(p)
 
         async function handle_control_packet(p) {
-            info("Received a control packet: " + p.dataAsString())
 
             if (p.src_addr == server_id) {
+                info("Received a control packet from server: " + p.dataAsString())
                 // Packet comes from server.
                 var json = p.toJson()
 
@@ -825,7 +825,7 @@ async function main() {
                     return
                 }
 
-                if (!(peer_id in peers)) {
+                if (!(peer_id in peers)) { // New peer!
                     // Create peer object if none exists.
                     async function tx(p) {
                         conn.sendPacket(p)
