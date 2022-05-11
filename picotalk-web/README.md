@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2022 Thomas Kramer
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # Hosting PicoTalk Web
 
 Running PicoTalk as a website requires to run two parts: The actual website (user interface) and the voice call server.

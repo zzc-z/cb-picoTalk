@@ -1,0 +1,22 @@
+// SPDX-FileCopyrightText: 2022 Thomas Kramer
+//
+// SPDX-License-Identifier: CC-BY-SA-4.0
+
+// Work-in-progress
+
+theory OBS_EQ_TEST
+begin
+
+builtins: hashing
+
+rule choose_password:
+    [ ]
+    --[ ChoosePassword() ]->
+    [ !Password(diff($passwordA, $passwordB)) ]
+
+rule publish:
+    [ Fr(~nonce), !Password(pw) ]
+    -->
+    [ Out(h(<~nonce, pw>)) ]
+
+end

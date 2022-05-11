@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2022 Thomas Kramer
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # The PicoTalk Protocol
 
 This gives an outline of the protocols used by this project.

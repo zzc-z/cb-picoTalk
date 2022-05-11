@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2019 Rafael da Silva Rocha
+// SPDX-License-Identifier: MIT
+
 var l=this;
 function m(n){function h(a,c,b){for(var d=[],e=0;e<a;e++)d.push(this.b({u:c,s:b,Q:.5/Math.sin(Math.PI/(2*a)*(e+.5))}));this.a=[];for(a=0;a<d.length;a++)this.a[a]={A:d[a].c[0],B:d[a].c[1],C:d[a].c[2],v:d[a].i[0],w:d[a].i[1],k:d[a].k,z:[0,0]}}function k(a,c,b){b=2*Math.PI*b/c;c=0;this.a=[];for(var d=0;d<=a;d++)0===d-a/2?this.a[d]=b:(this.a[d]=Math.sin(b*(d-a/2))/(d-a/2),this.a[d]*=.54-.46*Math.cos(2*Math.PI*d/a)),c+=this.a[d];for(b=0;b<=a;b++)this.a[b]/=c;this.z=this.b()}function g(a,c,b){this.G=a;
 this.b=(a-1)/c;this.h=this.D;"point"===b.method?this.h=this.I:"linear"===b.method?this.h=this.H:"sinc"===b.method&&(this.h=this.J);this.K=1-Math.max(0,Math.min(1,b.tension||0));this.l=b.sincFilterSize||1;this.F=t(b.sincWindow||u)}function u(a){return Math.exp(-a/2*a/2)}function t(a){return function(c){return(0===c?1:Math.sin(Math.PI*c)/(Math.PI*c))*a(c)}}function p(a,c,b){for(var d=0,e=c.length;d<e;d++)c[d]=b.h(d,a)}g.prototype.I=function(a,c){return this.a(Math.round(this.b*a),c)};g.prototype.H=

@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2022 Thomas Kramer
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 ## Install on Debian
 
 Install prerequisites:

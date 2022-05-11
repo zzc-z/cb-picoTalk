@@ -1,24 +1,7 @@
-/*
- * Copyright (c) 2020 Thomas Kramer.
- *
- * This file is part of picoTalk 
- * (see https://codeberg.org/tok/picotalk).
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
- */
-
-
+// Copyright (c) 2020 Thomas Kramer.
+// SPDX-FileCopyrightText: 2022 Thomas Kramer
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 const version = [0, 0, 20]
 
@@ -616,7 +599,7 @@ async function main() {
     function getAudioContext() {
         if (audioContext == null) {
             audioContext = new AudioContext()
-            //const audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:sample_rate});
+            //audioContext = new AudioContext({sampleRate:sample_rate});
         }
         return audioContext
     }
@@ -1002,10 +985,11 @@ async function main() {
                     audio: {
                         // Constraints seem to have little effect in Firefox.
                         sampleRate: sample_rate,
-                        sampleSize: 16,
+                        sampleSize: sample_size * 8, // Bit width of a sample.
                         echoCancellation: true,
                         autoGainControl: true,
-                        noiseSuppression: true
+                        noiseSuppression: true,
+                        channelCount: 1,
                     }
                 }
 

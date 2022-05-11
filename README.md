@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2022 Thomas Kramer
+
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # PicoTalk
 
 PicoTalk aims to be a simple and privacy oriented solution for group-calls. PicoTalk relies on a central server that is used for signalling and also routing and mixing of the audio signals. The goal is to provide true end-to-end encrypted group-calls such that the server does not have to be trusted. This is work-in-progress tough.
