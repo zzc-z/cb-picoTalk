@@ -18,7 +18,6 @@ import nacl.hash
 import nacl.secret
 import nacl.encoding
 from nacl.bindings.crypto_scalarmult import crypto_scalarmult, crypto_scalarmult_base
-from nacl.bindings import crypto_core_ed25519_from_uniform
 from .packet import TLVPacket, PacketType
 from .base import Connection
 
