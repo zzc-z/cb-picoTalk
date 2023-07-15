@@ -12,7 +12,7 @@ More on the protocol can be found [here](./doc/protocol.md).
 
 An example with a web user interface can be found here:
 
-* https://pages.codeberg.org/tok/talk
+* https://tok.codeberg.page/talk/
 * https://picotalk.tkramer.ch
 
 *PicoTalk Python* is the main implementation of picoTalk.
