@@ -591,7 +591,7 @@ class PicoTalkClient:
                             frame = decrypt_audio_frame(frame, key, peer_id, nonce)
 
                     # Convert to 32 bit integer for signal processing.
-                    frame = frame.astype(np.int)
+                    frame = frame.astype(np.int32)
 
                     if audio_buffer.full():
                         # Drop oldest frame if the buffer is full.

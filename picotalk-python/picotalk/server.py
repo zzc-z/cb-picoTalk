@@ -414,7 +414,7 @@ class Client:
         audio_data = data[:common.frame_size * common.sample_size]
         tag_data = data[common.frame_size * common.sample_size:]
         # Convert frame to a numpy array.
-        frame = np.frombuffer(audio_data, dtype=common.sample_data_type).astype(np.int)
+        frame = np.frombuffer(audio_data, dtype=common.sample_data_type).astype(np.int16)
         audio_tags = np.frombuffer(tag_data, dtype=common.audio_tag_data_type)
 
         assert len(audio_tags) == 1, "Peer should attach exactly one tag."
