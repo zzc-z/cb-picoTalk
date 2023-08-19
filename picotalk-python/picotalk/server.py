@@ -297,7 +297,7 @@ class Room:
                         pass
 
                 # Convert to a numpy array.
-                tags = np.array(tags)
+                tags = np.array(tags, dtype = common.audio_tag_data_type)
 
                 out = peer_out.audio_queue_output
                 if out.full():
