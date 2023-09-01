@@ -34,6 +34,7 @@ setup(name='picotalk',
           ]
       },
       install_requires=[
+          'aiohttp',
           'pyaudio',
           'pynacl',
           'numpy',  # BSD
