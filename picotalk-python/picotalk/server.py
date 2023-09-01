@@ -272,6 +272,7 @@ class Room:
                     frame, tag = q.get_nowait()
                     assert isinstance(frame, np.ndarray)
                     assert isinstance(tags, np.ndarray)
+                    assert tags.dtype == common.audio_tag_data_type
                     # Audio frames need to have a fixed size.
                     if frame.shape == (common.frame_size,):
                         current_frames_and_tags[peer] = frame, tag
