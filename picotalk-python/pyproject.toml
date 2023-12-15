@@ -19,8 +19,9 @@ authors = [
 
 classifiers = [
     'License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)',
-    'Development Status :: 3 - Beta',
-    'Programming Language :: Python :: 3.8'
+    'Development Status :: 4 - Beta',
+    'Programming Language :: Python :: 3.8',
+    'Topic :: Communications :: Conferencing'
 ]
 
 dependencies = [
