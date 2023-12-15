@@ -28,7 +28,8 @@ dependencies = [
   "aiohttp",
   "pyaudio",
   "numpy",
-  "scipy"
+  "scipy",
+  "pynacl"
 ]
 
 [project.scripts]
