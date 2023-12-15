@@ -10,6 +10,8 @@ const frame_size = 512 // Number of samples in an audio frame.
 const sample_size = 2 // Size of a sample in bytes.
 const server_id = 1
 
+const endianness = false // Big endian
+
 
 // Define logging functions.
 function log(str) {
@@ -95,8 +97,8 @@ function generate_key_stream(key, peer_id, counter, length) {
     // Create the nonce.
     var nonce = new Uint8Array(24)
     var d = new DataView(nonce.buffer)
-    d.setUint16(0, peer_id)
-    d.setUint32(2, counter)
+    d.setUint16(0, peer_id, endianness)
+    d.setUint32(2, counter, endianness)
 
     // Construct key stream.
     var zeros = new Uint8Array(length*2) // TODO: Explicitly fill with zeros?
@@ -177,9 +179,9 @@ class Packet {
         var d = new DataView(buf)
 
         d.setUint8(0, this.type)
-        d.setUint16(1, this.data.byteLength)
-        d.setUint16(3, this.src_addr)
-        d.setUint16(5, this.dest_addr)
+        d.setUint16(1, this.data.byteLength, endianness)
+        d.setUint16(3, this.src_addr, endianness)
+        d.setUint16(5, this.dest_addr, endianness)
 
         // Copy data into the buffer.
         var u = new Uint8Array(buf)
@@ -198,9 +200,9 @@ class Packet {
 function parsePacket(arraybuffer) {
     var msg = new DataView(arraybuffer)
     var type = msg.getUint8(0)
-    var length = msg.getUint16(1)
-    var src_addr = msg.getUint16(3)
-    var dest_addr = msg.getUint16(5)
+    var length = msg.getUint16(1, endianness)
+    var src_addr = msg.getUint16(3, endianness)
+    var dest_addr = msg.getUint16(5, endianness)
     var data = arraybuffer.slice(7)
 
     var p = new Packet(type, data, src_addr, dest_addr)
@@ -210,8 +212,11 @@ function parsePacket(arraybuffer) {
 // Parse a (peer_id, nonce) audio tag that is appended to the audio frame.
 function parseAudioTag(arraybuffer, offset) {
     var v = new DataView(arraybuffer)
-    var peer_id = v.getUint16(offset + 0)
-    var nonce = v.getUint32(offset + 2)
+    var a = v.getUint8(offset)
+    var b = v.getUint8(offset + 1)
+    debug(`a = ${a}, b = ${b}`)
+    var peer_id = v.getUint16(offset + 0, endianness)
+    var nonce = v.getUint32(offset + 2, endianness)
     return {peer_id: peer_id, nonce: nonce}
 }
 
@@ -219,8 +224,8 @@ function parseAudioTag(arraybuffer, offset) {
 function encodeAudioTag(peer_id, counter) {
     var buf = new ArrayBuffer(6)
     var d = new DataView(buf)
-    d.setUint16(0, peer_id)
-    d.setUint32(2, counter)
+    d.setUint16(0, peer_id, endianness)
+    d.setUint32(2, counter, endianness)
     return buf
 }
 
@@ -251,8 +256,8 @@ class SecureConnection {
         var d = new DataView(nonce.buffer)
         d.setUint8(0, connection_id)
         d.setUint8(1, role)
-        d.setUint32(2, 0) // TODO: Emulate 64 bit counter
-        d.setUint32(6, counter & 0xFFFFFFFF)
+        d.setUint32(2, 0, endianness) // TODO: Emulate 64 bit counter
+        d.setUint32(6, counter & 0xFFFFFFFF, endianness)
         return nonce
     }
 
@@ -262,7 +267,7 @@ class SecureConnection {
         return {
             connection_id: d.getUint8(0),
             role: d.getUint8(1),
-            counter: (d.setUint32(2) << 32) + d.setUint32(6)
+            counter: (d.setUint32(2, endianness) << 32) + d.setUint32(6, endianness)
         }
     }
 
