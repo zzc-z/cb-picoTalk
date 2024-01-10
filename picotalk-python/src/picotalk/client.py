@@ -723,7 +723,7 @@ class PicoTalkClient:
 
         if not use_udp:
             # Close UDP connection again.
-            udp_conn.close()
+            await udp_conn.close()
 
         # Launch tasks for server communication and audio.
 

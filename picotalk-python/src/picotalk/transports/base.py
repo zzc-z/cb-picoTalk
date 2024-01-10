@@ -33,7 +33,7 @@ class Connection:
     def is_closed(self) -> bool:
         return self._is_closed
 
-    def close(self):
+    async def close(self):
         self._is_closed = True
 
     def get_extra_info(self, key):

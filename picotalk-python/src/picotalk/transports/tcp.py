@@ -31,8 +31,9 @@ class TcpConnection(Connection):
         self.writer.write(p.encode())
         await self.writer.drain()
 
-    def close(self):
+    async def close(self):
         self.writer.close()
+        await self.writer.wait_closed()
 
 
 async def run_tcp_server(

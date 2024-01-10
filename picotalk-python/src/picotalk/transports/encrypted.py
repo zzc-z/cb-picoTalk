@@ -141,12 +141,12 @@ class SecureConnection(Connection):
         self.__counter += 1  # Increment nonce after encryption.
         await self.__conn.write_packet(p_encrypted)
 
-    def close(self):
+    async def close(self):
         """
         Close the connection and the underlying connection.
         """
-        super().close()
-        self.__conn.close()
+        await super().close()
+        await self.__conn.close()
 
 
 async def authenticated_key_exchange(conn: Connection,

@@ -589,7 +589,7 @@ class Client:
 
             if not use_udp:
                 # UDP connection will not be used. Close it.
-                udp_conn.close()
+                await udp_conn.close()
 
             # List of async tasks that are started. They need to be awaited later.
             all_tasks = []
@@ -629,7 +629,7 @@ class Client:
         finally:
             # Tear down the UDP stream.
             if udp_conn is not None:
-                udp_conn.close()
+                await udp_conn.close()
             # Remove this peer from the room.
             room.remove_peer(self)
 
@@ -658,7 +658,7 @@ async def run_tcp_server(server_addr: str,
         client_task = asyncio.create_task(client.run_connection(server_udp_port=server_udp_port))
         await client_task
         logger.info(f"Handle client finished {addr}")
-        conn.close()
+        await conn.close()
 
     await transport_tcp.run_tcp_server(
         handle_client_tcp,

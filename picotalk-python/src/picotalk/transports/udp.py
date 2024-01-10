@@ -139,8 +139,8 @@ class UdpConnection(Connection):
         assert self.dest_addr is not None, "Destination address is not yet known."
         self.router.send_datagram(self.stream_id, p.encode(), self.dest_addr)
 
-    def close(self):
-        super().close()
+    async def close(self):
+        await super().close()
         self.router.remove_stream(self.stream_id)
 
 

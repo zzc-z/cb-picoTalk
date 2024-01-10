@@ -33,8 +33,8 @@ class WebSocketConnection(Connection):
     async def write_packet(self, p: TLVPacket):
         await self.ws.send_bytes(p.encode())
 
-    def close(self):
-        self.ws.close()
+    async def close(self):
+        await self.ws.close()
 
 
 async def run_websocket_server(
