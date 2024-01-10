@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2024 Thomas Kramer
+#
+# SPDX-License-Identifier: CC0-1.0
+
+steps:
+    test:
+        image: python
+        commands:
+            - apt update
+            - apt install -y python3-pytest python3-numpy python3-aiohttp python3-scipy python3-pyaudio
+            - export PATH=$PATH:$HOME/.local/bin/
+            - cd picotalk-python
+            - python3 -m pip install .
+            - bash test.sh
+    reuse:
+        image: fsfe/reuse
+        commands:
+            - reuse lint
