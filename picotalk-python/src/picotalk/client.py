@@ -818,13 +818,16 @@ def main():
 
     client = PicoTalkClient(password=password, user_name=args.user)
 
-    asyncio.run(client.run(server_addr=args.server,
-                           server_port=args.port,
-                           room_name=args.room,
-                           user_name=args.user,
-                           audio_processor=audio_processor,
-                           try_use_udp=not args.noudp
-                           ))
+    try:
+        asyncio.run(client.run(server_addr=args.server,
+                               server_port=args.port,
+                               room_name=args.room,
+                               user_name=args.user,
+                               audio_processor=audio_processor,
+                               try_use_udp=not args.noudp
+                               ))
+    except KeyboardInterrupt:
+        exit(1)
 
 
 if __name__ == '__main__':
